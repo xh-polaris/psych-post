@@ -49,5 +49,8 @@ func NewConfig() (*Config, error) {
 }
 
 func GetConfig() *Config {
+	if config == nil {
+		_, _ = NewConfig()
+	}
 	return config
 }
