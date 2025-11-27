@@ -1,40 +1,49 @@
-package config
+package conf
 
 import (
-	"github.com/zeromicro/go-zero/core/stores/cache"
-	"github.com/zeromicro/go-zero/core/stores/redis"
 	"os"
 
 	"github.com/zeromicro/go-zero/core/service"
+	"github.com/zeromicro/go-zero/core/stores/cache"
 
 	"github.com/zeromicro/go-zero/core/conf"
 )
 
 var config *Config
 
-type RabbitMQ struct {
-	Url string
-}
+type (
+	RabbitMQ struct {
+		Url string
+	}
 
-type Config struct {
-	service.ServiceConf
-	ListenOn string
-	State    string
-	Cache    cache.CacheConf
-	Redis    *redis.RedisConf
-	RabbitMQ RabbitMQ
-	Mongo    struct {
+	MongoDB struct {
 		URL string
 		DB  string
 	}
-	Consumers int
-}
+
+	Cache struct {
+		Addr     string
+		Password string
+	}
+
+	Config struct {
+		service.ServiceConf
+		ListenOn    string
+		State       string
+		CacheConf   cache.CacheConf
+		Cache       *Cache
+		RabbitMQ    *RabbitMQ
+		Mongo       *MongoDB
+		ModelConfig *ModelConfig
+		Consumers   int
+	}
+)
 
 func NewConfig() (*Config, error) {
 	c := new(Config)
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
-		path = "etc/config.yaml"
+		path = "etc/conf.yaml"
 	}
 	err := conf.Load(path, c)
 	if err != nil {

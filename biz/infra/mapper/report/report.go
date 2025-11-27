@@ -1,45 +1,73 @@
 package report
 
 import (
-	"github.com/xh-polaris/psych-pkg/app"
-	"github.com/xh-polaris/psych-post/biz/infra/mapper/history"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"time"
+
+	"github.com/xh-polaris/psych-post/pkg/core"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type (
-	Report struct {
-		ID         primitive.ObjectID `bson:"_id"`
-		HisID      primitive.ObjectID `bson:"his_id"`
-		Items      []*Item            `bson:"items"`
-		Status     int                `bson:"status"`
-		CreateTime time.Time          `bson:"create_time"`
-		DeleteTime time.Time          `bson:"delete_time,omitempty"`
-	}
+type Report struct {
+	// 基本信息
+	ID          primitive.ObjectID     `bson:"_id,omitempty"`       // 报表id
+	UnitID      primitive.ObjectID     `bson:"unit_id,omitempty"`   // 单位id
+	UserID      primitive.ObjectID     `bson:"user_id,omitempty"`   // 用户id
+	Session     primitive.ObjectID     `bson:"session,omitempty"`   // session
+	ReportUsage *core.LLMUsage         `bson:"report_usage"`        // 报表生成总消耗
+	ChatUsage   *core.LLMUsage         `bson:"chat_usage"`          // 大模型总token消耗
+	ASRUsage    *core.ASRUsage         `bson:"asr_usage,omitempty"` // asr消耗
+	TTSUsage    *core.TTSUsage         `bson:"tts_usage,omitempty"` // tts消耗
+	Round       int                    `bson:"round"`               // 总轮数
+	Start       time.Time              `bson:"start"`               // 对话开始时间
+	End         time.Time              `bson:"end"`                 // 对话结束时间
+	Config      *core.Config           `bson:"config"`              // 对话配置
+	Info        map[string]interface{} `bson:"info"`                // 额外信息
 
-	// Item 报表分析结果单元
-	Item struct {
-		// Group 字段分组, 同一个group的
-		Group string `json:"group"`
-		// Type 字段类型 string, number, array-string, array-number
-		Type  string `json:"type"`
-		Key   string `json:"key"`
-		Value string `json:"value"`
-	}
+	// 报表结果
+	Result *Result `bson:"result"` // 报表结果
+}
+
+type Result struct {
+	Title string  `json:"title" bson:"title"`
+	Items []*Item `json:"items" bson:"items"`
+}
+
+const (
+	Number      = "Number"
+	Text        = "Text"
+	Tag         = "Tag"
+	Level       = "Level"
+	TextArray   = "TextArray"
+	NumberArray = "NumberArray"
 )
 
-func ConvReport(his *history.History, resp *app.Report) *Report {
-	var items []*Item
-	for _, item := range resp.Items {
-		items = append(items, &Item{
-			Group: item.Group,
-			Type:  item.Type,
-			Key:   item.Key,
-			Value: item.Value,
-		})
-	}
-	return &Report{
-		HisID: his.ID,
-		Items: items,
-	}
+type Item struct {
+	Type  string `json:"type" bson:"type"`   // KV对象的类型, 分数, 文本, tag, 文本数组, 数字数组
+	Key   string `json:"key" bson:"key"`     // KV对象的键
+	Value any    `json:"value" bson:"value"` // KV对象的值
+}
+
+func (t *Item) GetNumber() (v float64, ok bool) {
+	v, ok = t.Value.(float64)
+	return
+}
+
+func (t *Item) GetText() (v string, ok bool) {
+	v, ok = t.Value.(string)
+	return
+}
+
+func (t *Item) GetTag() (v []string, ok bool) {
+	v, ok = t.Value.([]string)
+	return
+}
+
+func (t *Item) GetTextArray() (v []string, ok bool) {
+	v, ok = t.Value.([]string)
+	return
+}
+
+func (t *Item) GetNumberArray() (v []float64, ok bool) {
+	v, ok = t.Value.([]float64)
+	return
 }
