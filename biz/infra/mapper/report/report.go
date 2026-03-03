@@ -4,15 +4,15 @@ import (
 	"time"
 
 	"github.com/xh-polaris/psych-post/pkg/core"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Report struct {
 	// 基本信息
-	ID          primitive.ObjectID     `bson:"_id,omitempty"`       // 报表id
-	UnitID      primitive.ObjectID     `bson:"unit_id,omitempty"`   // 单位id
-	UserID      primitive.ObjectID     `bson:"user_id,omitempty"`   // 用户id
-	Session     primitive.ObjectID     `bson:"session,omitempty"`   // session
+	ID          bson.ObjectID          `bson:"_id,omitempty"`       // 报表id
+	UnitID      bson.ObjectID          `bson:"unit_id,omitempty"`   // 单位id
+	UserID      bson.ObjectID          `bson:"user_id,omitempty"`   // 用户id
+	Session     bson.ObjectID          `bson:"session,omitempty"`   // session
 	ReportUsage *core.LLMUsage         `bson:"report_usage"`        // 报表生成总消耗
 	ChatUsage   *core.LLMUsage         `bson:"chat_usage"`          // 大模型总token消耗
 	ASRUsage    *core.ASRUsage         `bson:"asr_usage,omitempty"` // asr消耗
@@ -24,7 +24,8 @@ type Report struct {
 	Info        map[string]interface{} `bson:"info"`                // 额外信息
 
 	// 报表结果
-	Result *Result `bson:"result"` // 报表结果
+	Result   *Result  `bson:"result"`   // 报表结果
+	Keywords []string `bson:"keywords"` // 关键词 放最外层方便聚合
 }
 
 type Result struct {
@@ -70,4 +71,19 @@ func (t *Item) GetTextArray() (v []string, ok bool) {
 func (t *Item) GetNumberArray() (v []float64, ok bool) {
 	v, ok = t.Value.([]float64)
 	return
+}
+
+// GetKeywords 从 Items 中提取关键词
+func (r *Result) GetKeywords() []string {
+	var keywords []string
+
+	for _, item := range r.Items {
+		if item.Type == TextArray {
+			if texts, ok := item.GetTextArray(); ok {
+				keywords = append(keywords, texts...)
+			}
+		}
+	}
+
+	return keywords
 }

@@ -21,7 +21,7 @@ import (
 	"github.com/xh-polaris/psych-post/pkg/core"
 	"github.com/xh-polaris/psych-post/pkg/logs"
 	"github.com/xh-polaris/psych-post/pkg/mq"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ConsumeManager 管理报表生成任务的消息消费
@@ -77,7 +77,7 @@ func (cm *ConsumeManager) Close() {
 
 func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok bool, err error) {
 	var notify *core.PostNotify
-	session := primitive.NewObjectID().Hex()
+	session := bson.NewObjectID().Hex()
 
 	// 解析消息
 	if err = sonic.Unmarshal(d.Body, &notify); err != nil {
@@ -134,7 +134,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 	// 存储报表
 	report := &re.Report{
-		ID:          primitive.NewObjectID(),
+		ID:          bson.NewObjectID(),
 		UnitID:      oids[0],
 		UserID:      oids[1],
 		Session:     oids[2],
@@ -148,6 +148,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		Config:      notify.Config,
 		Info:        notify.Info,
 		Result:      &result,
+		Keywords:    result.GetKeywords(),
 	}
 	if err = re.Mapper.InsertOne(ctx, report); err != nil {
 		logs.Error("[mq consumer] insert report err:", err)
