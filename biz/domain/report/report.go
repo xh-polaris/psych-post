@@ -3,6 +3,8 @@ package report
 import (
 	"context"
 	"fmt"
+	"github.com/xh-polaris/psych-post/biz/cst"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"strings"
 	"sync"
 	"time"
@@ -121,39 +123,56 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Errorf("[mq consumer] generate err: %s", err)
 		return
 	}
-	// 解析报表
+	// 解析报表，填充报表内容
 	clean := strings.Trim(resp.Content, " `\r\n\t")
-	var result re.Result
+	var result re.Report
 	if err = sonic.Unmarshal([]byte(clean), &result); err != nil {
 		logs.Errorf("[mq consumer] unmarshal err: %s", err)
 		return
 	}
+	// 补充报表meta并存入数据库
 	oids, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId, notify.Session)
 	if err != nil {
 		return
 	}
-	// 存储报表
 	report := &re.Report{
-		ID:          bson.NewObjectID(),
-		UnitID:      oids[0],
-		UserID:      oids[1],
-		Session:     oids[2],
-		ReportUsage: usage(resp),
-		ChatUsage:   notify.Usage.LLMUsage,
-		TTSUsage:    notify.Usage.TTSUsage,
-		ASRUsage:    notify.Usage.ASRUsage,
-		Round:       count,
-		Start:       time.Unix(notify.Start, 0),
-		End:         time.Unix(notify.End, 0),
-		Config:      notify.Config,
-		Info:        notify.Info,
-		Result:      &result,
-		Keywords:    result.GetKeywords(),
+		ID:             bson.NewObjectID(),
+		UnitID:         oids[0],
+		UserID:         oids[1],
+		ConversationID: oids[2],
+		ReportUsage:    usage(resp),
+		ChatUsage:      notify.Usage.LLMUsage,
+		TTSUsage:       notify.Usage.TTSUsage,
+		ASRUsage:       notify.Usage.ASRUsage,
+		Round:          count,
+		Start:          time.Unix(notify.Start, 0),
+		End:            time.Unix(notify.End, 0),
+		Config:         notify.Config,
+		Info:           notify.Info,
 	}
 	if err = re.Mapper.InsertOne(ctx, report); err != nil {
 		logs.Error("[mq consumer] insert report err:", err)
 		return
 	}
+	// 检查是否需要创建预警
+	if result.NeedAlarm {
+		al := alarm.Alarm{
+			ID:             bson.NewObjectID(),
+			UnitID:         oids[0],
+			UserID:         oids[1],
+			ConversationID: oids[2],
+			Emotion:        alarm.EmotionStoI[result.Emotion],
+			Keywords:       result.Keywords,
+			Status:         alarm.StatusStoI[cst.Pending],
+			CreateTime:     time.Now(),
+			UpdateTime:     time.Now(),
+		}
+		if err = alarm.Mapper.Insert(ctx, &al); err != nil {
+			logs.Error("[mq consumer] insert alarm err:", err)
+			return
+		}
+	}
+
 	return true, nil
 }
 

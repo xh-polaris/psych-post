@@ -3,15 +3,23 @@ package cst
 // mapper层字段枚举
 const (
 	Id             = "_id"
-	ConversationId = "conversation_id"
-	MessageId      = "message_id"
-	UserId         = "user_id"
-	CreateTime     = "create_time"
-	UpdateTime     = "update_time"
-	DeleteTime     = "delete_time"
-	UnitId         = "unit_id"
+	ConversationID = "conversationId"
+	MessageID      = "messageId"
+	UserID         = "userId"
+	CreateTime     = "createTime"
+	UpdateTime     = "updateTime"
+	DeleteTime     = "deleteTime"
+	UnitID         = "unitId"
 	Code           = "code"
-	CodeType       = "code_type"
+	CodeType       = "codeType"
+
+	// 预警管理-情绪类型
+	Danger    = "danger"
+	Depress   = "depress"
+	Negative  = "negative"
+	Normal    = "normal"
+	Processed = "processed" // 预警状态-已处理
+	Pending   = "pending"   // 预警状态-待处理
 
 	Status        = "status"
 	DeletedStatus = -1
@@ -20,6 +28,8 @@ const (
 	Score         = "score"
 	NE            = "$ne"
 	LT            = "$lt"
+	GT            = "$gt"
+	In            = "$in"
 	Set           = "$set"
 	Text          = "$text"
 	Search        = "$search"

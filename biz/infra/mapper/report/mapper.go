@@ -7,16 +7,16 @@ import (
 	"github.com/zeromicro/go-zero/core/stores/monc"
 )
 
-var _ MongoMapper = (*mongoMapper)(nil)
+var _ IMongoMapper = (*mongoMapper)(nil)
 
-var Mapper MongoMapper
+var Mapper IMongoMapper
 
 const (
 	collection     = "report"
 	cacheKeyPrefix = "cache:report:"
 )
 
-type MongoMapper interface {
+type IMongoMapper interface {
 	InsertOne(ctx context.Context, report *Report) error
 }
 
@@ -24,7 +24,7 @@ type mongoMapper struct {
 	conn *monc.Model
 }
 
-func New(config *conf.Config) MongoMapper {
+func New(config *conf.Config) IMongoMapper {
 	conn := monc.MustNewModel(config.Mongo.URL, config.Mongo.DB, collection, config.CacheConf)
 	Mapper = &mongoMapper{conn: conn}
 	return Mapper
