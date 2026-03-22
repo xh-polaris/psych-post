@@ -63,3 +63,14 @@ func BuildBytes(data ...[]byte) []byte {
 	}
 	return b.Bytes()
 }
+
+// CalculateChange 计算统计数据变化率
+func CalculateChange(current, lastWeek float64) float64 {
+	if lastWeek == 0 {
+		if current == 0 {
+			return 0
+		}
+		return 100.0 // 上周为0，本周有数据，增长100%
+	}
+	return ((current - lastWeek) / lastWeek) * 100
+}

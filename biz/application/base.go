@@ -13,7 +13,7 @@ import (
 type AppDependency struct {
 	Cache         cache.Cmdable
 	MessageMapper message.MongoMapper
-	ReportMapper  report.MongoMapper
+	ReportMapper  report.IMongoMapper
 	HisMgr        *his.HistoryManager
 	ConnManager   *mq.ConnManager
 }

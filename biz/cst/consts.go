@@ -2,29 +2,65 @@ package cst
 
 // mapper层字段枚举
 const (
-	Id             = "_id"
-	ConversationId = "conversation_id"
-	MessageId      = "message_id"
-	UserId         = "user_id"
+	ID             = "_id"
+	ConversationID = "conversation_id"
+	MessageID      = "message_id"
+	UserID         = "user_id"
 	CreateTime     = "create_time"
 	UpdateTime     = "update_time"
 	DeleteTime     = "delete_time"
-	UnitId         = "unit_id"
 	Code           = "code"
 	CodeType       = "code_type"
+	Role           = "role"
+	Phone          = "phone"
+	Name           = "name"
+	UnitID         = "unit_id"
+	Gender         = "gender"
+	Birth          = "birth"
+	EnrollYear     = "enroll_year"
+	Grade          = "grade"
+	Class          = "class"
+	Address        = "address"
+	Contact        = "contact"
+	Password       = "password"
+	RiskLevel      = "risk_level"
+	Remark         = "remark"
 
 	Status        = "status"
 	DeletedStatus = -1
-	Meta          = "$meta"
-	TextScore     = "textScore"
-	Score         = "score"
-	NE            = "$ne"
-	LT            = "$lt"
-	Set           = "$set"
-	Text          = "$text"
-	Search        = "$search"
-	Regex         = "$regex"
-	Options       = "$options"
+
+	Emotion   = "emotion"
+	Meta      = "$meta"
+	TextScore = "textScore"
+	Score     = "score"
+	NE        = "$ne"
+	LT        = "$lt"
+	GT        = "$gt"
+	In        = "$in"
+	Set       = "$set"
+	Text      = "$text"
+	Search    = "$search"
+	Regex     = "$regex"
+	Options   = "$options"
+
+	// 预警管理
+	// 情绪类型
+	Danger   = "danger"
+	Depress  = "depress"
+	Negative = "negative"
+	Normal   = "normal"
+	// 预警记录状态
+	Processed = "processed"
+	Pending   = "pending"
+
+	// 用户风险等级
+	High   = "high"
+	Medium = "medium"
+	Low    = "low"
+
+	// 报表内容相关字段 应严格和psych-post字段统一
+	Keywords = "keywords"
+	Digest   = "digest"
 )
 
 const (
