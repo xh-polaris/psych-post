@@ -3,14 +3,8 @@ package message
 import (
 	"time"
 
-	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/pkg/core"
 	"go.mongodb.org/mongo-driver/v2/bson"
-)
-
-var (
-	RoleStoI = map[string]int{cst.System: 0, cst.Assistant: 1, cst.User: 2, cst.Tool: 3}
-	RoleItoS = map[int]string{0: cst.System, 1: cst.Assistant, 2: cst.User, 3: cst.Tool}
 )
 
 // Message 一条消息, 可能归属于用户或模型

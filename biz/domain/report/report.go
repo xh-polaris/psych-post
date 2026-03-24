@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/xh-polaris/psych-post/biz/conf"
-	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
@@ -24,6 +23,7 @@ import (
 	"github.com/xh-polaris/psych-post/pkg/errorx"
 	"github.com/xh-polaris/psych-post/pkg/logs"
 	"github.com/xh-polaris/psych-post/pkg/mq"
+	"github.com/xh-polaris/psych-post/type/enum"
 	"github.com/xh-polaris/psych-post/type/errno"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -175,9 +175,9 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 			UnitID:         oids[0],
 			UserID:         oids[1],
 			ConversationID: oids[2],
-			Emotion:        alarm.EmotionStoI[result.Emotion],
+			Emotion:        result.Emotion,
 			Keywords:       result.Keywords,
-			Status:         alarm.StatusStoI[cst.Pending],
+			Status:         enum.AlarmStatusPending,
 			CreateTime:     time.Now(),
 		}
 		if err = alarm.Mapper.Insert(ctx, &al); err != nil {
@@ -220,7 +220,7 @@ func buildPrompt(notify *core.PostNotify, msgs []*message.Message) ([]*schema.Me
 		if m.Content != "" { // 消息有效
 			count++
 			sb.WriteString("<|")
-			sb.WriteString(message.RoleItoS[m.Role])
+			sb.WriteString(enum.MsgRoleItoA[m.Role])
 			sb.WriteString("|>")
 			sb.WriteString(" ")
 			sb.WriteString(m.Content)
