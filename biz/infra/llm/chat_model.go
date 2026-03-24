@@ -27,7 +27,7 @@ type ChatModel struct {
 
 // NewChatModel 根据provider创建对应的对话大模型
 func NewChatModel(ctx context.Context, uSession string, s *app.ChatSetting) (_ model.ToolCallingChatModel, err error) {
-	cm := &ChatModel{provider: s.Provider, model: s.Model, botId: s.BotId, uid: s.UserId}
+	cm := &ChatModel{uSession: uSession, provider: s.Provider, model: s.Model, botId: s.BotId, uid: s.UserId}
 	if cm.cli, err = newCli(ctx, s.Provider, s.Url, s.AccessKey, s.Model, s.BotId, s.UserId); err != nil {
 		return
 	}
@@ -45,7 +45,7 @@ func newCli(ctx context.Context, provider, url, sk, model, botId, uid string) (_
 
 func (m *ChatModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (_ *schema.Message, err error) {
 	in = reverse(in) // 翻转历史记录
-	return m.Generate(ctx, in, opts...)
+	return m.cli.Generate(ctx, in, opts...)
 }
 
 func (m *ChatModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (_ *schema.StreamReader[*schema.Message], err error) {

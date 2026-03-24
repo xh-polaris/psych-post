@@ -9,20 +9,19 @@ import (
 	"github.com/xh-polaris/psych-post/pkg/errorx"
 	"github.com/xh-polaris/psych-post/pkg/logs"
 	"github.com/zeromicro/go-zero/core/stores/monc"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-var _ MongoMapper = (*mongoMapper)(nil)
+var _ IMongoMapper = (*mongoMapper)(nil)
 
 const (
 	collection     = "message"
 	cacheKeyPrefix = "cache:message:"
 )
 
-type MongoMapper interface {
+type IMongoMapper interface {
 	RetrieveMessage(ctx context.Context, conversation string, size int) ([]*Message, error)
 	Insert(ctx context.Context, msg *Message) error
 }
@@ -31,13 +30,13 @@ type mongoMapper struct {
 	conn *monc.Model
 }
 
-func NewMessageMongoMapper(config *conf.Config) MongoMapper {
+func NewMessageMongoMapper(config *conf.Config) IMongoMapper {
 	conn := monc.MustNewModel(config.Mongo.URL, config.Mongo.DB, collection, config.CacheConf)
 	return &mongoMapper{conn: conn}
 }
 
 func (m *mongoMapper) RetrieveMessage(ctx context.Context, conversation string, size int) (msgs []*Message, err error) {
-	oid, err := primitive.ObjectIDFromHex(conversation)
+	oid, err := bson.ObjectIDFromHex(conversation)
 	if err != nil {
 		return nil, err
 	}

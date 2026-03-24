@@ -12,7 +12,7 @@ import (
 
 type AppDependency struct {
 	Cache         cache.Cmdable
-	MessageMapper message.MongoMapper
+	MessageMapper message.IMongoMapper
 	ReportMapper  report.IMongoMapper
 	HisMgr        *his.HistoryManager
 	ConnManager   *mq.ConnManager
@@ -22,7 +22,7 @@ func InitAppDependency() {
 	deps := &AppDependency{}
 	deps.Cache = redis.New()
 	deps.MessageMapper = message.NewMessageMongoMapper(conf.GetConfig())
-	deps.ReportMapper = report.New(conf.GetConfig())
+	deps.ReportMapper = report.NewConfigMongoMapper(conf.GetConfig())
 	his.New(deps.Cache, deps.MessageMapper)
 	deps.HisMgr = his.Mgr
 	deps.ConnManager = mq.NewConnManager(conf.GetConfig().RabbitMQ.Url)
