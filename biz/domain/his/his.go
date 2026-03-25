@@ -20,11 +20,11 @@ const cachePrefix = "psych:msg:"
 // HistoryManager 历史记录管理, 所有的历史记录都按照从旧到新排序
 type HistoryManager struct {
 	cache  cache.Cmdable
-	mapper message.MongoMapper
+	mapper message.IMongoMapper
 }
 
 // New 创建一个新的历史记录管理器
-func New(cache cache.Cmdable, mapper message.MongoMapper) {
+func New(cache cache.Cmdable, mapper message.IMongoMapper) {
 	Mgr = &HistoryManager{cache: cache, mapper: mapper}
 }
 
@@ -59,7 +59,7 @@ func (h *HistoryManager) RetrieveMessageFromCache(ctx context.Context, key strin
 		return nil, cache.Nil
 	}
 
-	msgs := make([]*message.Message, len(result), len(result))
+	msgs := make([]*message.Message, 0, len(result))
 	for _, data := range result {
 		var msg message.Message
 		if err = sonic.Unmarshal([]byte(data), &msg); err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/xh-polaris/psych-post/biz/application"
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/report"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
@@ -34,7 +35,7 @@ func main() {
 	// 监听命令行以退出
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := report.New(conf.GetConfig().Consumers)
+	mgr := report.New(conf.GetConfig().Consumers, config.NewConfigMongoMapper(conf.GetConfig()))
 	mgr.BuildConsumer().StartConsume()
 	osSignalHandler(ctx)
 	mgr.Close()

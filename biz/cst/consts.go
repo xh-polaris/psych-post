@@ -77,3 +77,35 @@ const (
 	Tool     = "tool"
 	ToolEnum = 3
 )
+
+// Event中各种类型枚举值
+const (
+	EventMessageContentTypeText     = 0
+	EventMessageContentTypeThink    = 1
+	EventMessageContentTypeSuggest  = 2
+	EventMessageContentTypeCode     = 3 // 代码
+	EventMessageContentTypeCodeType = 4 // 代码
+	MessageStatus                   = 0
+)
+
+// Message相关枚举值
+const (
+	ContentTypeText      = 0
+	MessageTypeText      = 0
+	InputContentTypeText = 0
+	ConversationTypeText = 0
+)
+
+// schema.Message 中Extra携带信息
+const (
+	EventMessageContentType = "eventMessageContentType" // 模型消息
+)
+
+// 流式响应处理相关标签
+const (
+	ThinkStart   = "<think>"
+	ThinkEnd     = "</think>"
+	SuggestStart = "<suggest>"
+	SuggestEnd   = "</suggest>"
+	CodeBound    = "```"
+)

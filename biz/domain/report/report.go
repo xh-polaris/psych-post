@@ -3,8 +3,6 @@ package report
 import (
 	"context"
 	"fmt"
-	"github.com/xh-polaris/psych-post/biz/cst"
-	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"strings"
 	"sync"
 	"time"
@@ -12,17 +10,21 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/schema"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/xh-polaris/psych-idl/kitex_gen/profile"
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
 	re "github.com/xh-polaris/psych-post/biz/infra/mapper/report"
-	"github.com/xh-polaris/psych-post/biz/infra/rpc"
 	"github.com/xh-polaris/psych-post/biz/infra/util"
 	"github.com/xh-polaris/psych-post/pkg/app"
 	"github.com/xh-polaris/psych-post/pkg/core"
+	"github.com/xh-polaris/psych-post/pkg/errorx"
 	"github.com/xh-polaris/psych-post/pkg/logs"
 	"github.com/xh-polaris/psych-post/pkg/mq"
+	"github.com/xh-polaris/psych-post/type/enum"
+	"github.com/xh-polaris/psych-post/type/errno"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -31,11 +33,13 @@ type ConsumeManager struct {
 	ConnMgr        *mq.ConnManager // 连接管理
 	Consumers      []*mq.Consumer  // 消费者
 	ConsumersCount int             // 消费者数量
-	wg             *sync.WaitGroup
+
+	ConfigMapper config.IMongoMapper
+	wg           *sync.WaitGroup
 }
 
-func New(consumer int) *ConsumeManager {
-	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}}
+func New(consumer int, cfgMapper config.IMongoMapper) *ConsumeManager {
+	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper}
 	return cm
 }
 
@@ -79,7 +83,7 @@ func (cm *ConsumeManager) Close() {
 
 func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok bool, err error) {
 	var notify *core.PostNotify
-	session := bson.NewObjectID().Hex()
+	rptSession := bson.NewObjectID().Hex()
 
 	// 解析消息
 	if err = sonic.Unmarshal(d.Body, &notify); err != nil {
@@ -87,19 +91,24 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 	// 获取配置
-	cfg, err := rpc.GetPsychProfile().ConfigGetByUnitID(ctx, &profile.ConfigGetByUnitIdReq{UnitId: notify.UnitId, Admin: true})
+	unitOID, err := util.ObjectIDsFromHex(notify.UnitId)
+	if err != nil {
+		logs.Errorf("[mq consumer] invalid unitID from notify")
+		return false, err
+	}
+	cfg, err := cm.ConfigMapper.FindOneByUnitID(ctx, unitOID[0])
 	if err != nil {
 		logs.Errorf("[mq consumer] get unit config err: %s", err)
 		return
 	}
 	// 构造完整配置
-	reportSetting, err := conf.GetConfig().ReportConf(cfg.GetConfig().GetReport())
+	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, notify.UserId)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report config err: %s", err)
 		return
 	}
-	// 创建报表处理智能体
-	cli, err := app.NewChatApp(ctx, session, reportSetting)
+	// 创建报表处理智能体（实际采用ChatApp，传入ReportApp的AppID）
+	cli, err := app.NewChatApp(ctx, rptSession, reportSetting)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report app err: %s", err)
 		return
@@ -124,10 +133,10 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 	// 解析报表，填充报表内容
-	clean := strings.Trim(resp.Content, " `\r\n\t")
-	var result re.Report
+	clean := cleanJSONString(resp.Content)
+	var result *re.Report
 	if err = sonic.Unmarshal([]byte(clean), &result); err != nil {
-		logs.Errorf("[mq consumer] unmarshal err: %s", err)
+		logs.Errorf("[mq consumer] unmarshal err: %s, content: %s", err, clean)
 		return
 	}
 	// 补充报表meta并存入数据库
@@ -140,15 +149,20 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		UnitID:         oids[0],
 		UserID:         oids[1],
 		ConversationID: oids[2],
-		ReportUsage:    usage(resp),
-		ChatUsage:      notify.Usage.LLMUsage,
-		TTSUsage:       notify.Usage.TTSUsage,
+		ReportUsage:    rptUsage(resp),
 		ASRUsage:       notify.Usage.ASRUsage,
+		TTSUsage:       notify.Usage.TTSUsage,
 		Round:          count,
 		Start:          time.Unix(notify.Start, 0),
 		End:            time.Unix(notify.End, 0),
-		Config:         notify.Config,
+		Config:         cfg.Report,
 		Info:           notify.Info,
+		Title:          result.Title,
+		Keywords:       result.Keywords,
+		Digest:         result.Digest,
+		Emotion:        result.Emotion,
+		Body:           result.Body,
+		NeedAlarm:      result.NeedAlarm,
 	}
 	if err = re.Mapper.InsertOne(ctx, report); err != nil {
 		logs.Error("[mq consumer] insert report err:", err)
@@ -161,11 +175,10 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 			UnitID:         oids[0],
 			UserID:         oids[1],
 			ConversationID: oids[2],
-			Emotion:        alarm.EmotionStoI[result.Emotion],
+			Emotion:        result.Emotion,
 			Keywords:       result.Keywords,
-			Status:         alarm.StatusStoI[cst.Pending],
+			Status:         enum.AlarmStatusPending,
 			CreateTime:     time.Now(),
-			UpdateTime:     time.Now(),
 		}
 		if err = alarm.Mapper.Insert(ctx, &al); err != nil {
 			logs.Error("[mq consumer] insert alarm err:", err)
@@ -174,6 +187,23 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	return true, nil
+}
+
+func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*app.ChatSetting, error) {
+	if rptConf == nil {
+		return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
+	}
+	// 传入ReportApp的AppID
+	if cc, ok := c.ModelConfig.Chat[rptConf.Provider]; ok {
+		return &app.ChatSetting{
+			Provider:  rptConf.Provider,
+			Url:       cc.URL,
+			BotId:     rptConf.AppID,
+			UserId:    uid,
+			AccessKey: cc.AccessKey,
+		}, nil
+	}
+	return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
 }
 
 func buildPrompt(notify *core.PostNotify, msgs []*message.Message) ([]*schema.Message, int, error) {
@@ -190,7 +220,7 @@ func buildPrompt(notify *core.PostNotify, msgs []*message.Message) ([]*schema.Me
 		if m.Content != "" { // 消息有效
 			count++
 			sb.WriteString("<|")
-			sb.WriteString(message.RoleItoS[m.Role])
+			sb.WriteString(enum.MsgRoleItoA[m.Role])
 			sb.WriteString("|>")
 			sb.WriteString(" ")
 			sb.WriteString(m.Content)
@@ -200,7 +230,25 @@ func buildPrompt(notify *core.PostNotify, msgs []*message.Message) ([]*schema.Me
 	return []*schema.Message{schema.UserMessage(sb.String())}, count, nil
 }
 
-func usage(msg *schema.Message) *core.LLMUsage {
+func cleanJSONString(input string) string {
+	// 以```json\n 开头
+	if strings.HasPrefix(input, "```json") {
+		// 找到第一个换行符的位置
+		firstNewline := strings.Index(input, "\n")
+		if firstNewline != -1 {
+			// 找到最后一个 ``` 的位置
+			lastBacktick := strings.LastIndex(input, "```")
+			if lastBacktick != -1 && lastBacktick > firstNewline {
+				// 提取中间内容
+				return input[firstNewline+1 : lastBacktick]
+			}
+		}
+	}
+	// 否则直接返回
+	return input
+}
+
+func rptUsage(msg *schema.Message) *core.LLMUsage {
 	return &core.LLMUsage{
 		PromptTokens: msg.ResponseMeta.Usage.PromptTokens,
 		PromptTokenDetails: core.PromptTokenDetails{
