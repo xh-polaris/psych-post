@@ -17,6 +17,7 @@ import (
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
 	re "github.com/xh-polaris/psych-post/biz/infra/mapper/report"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/user"
 	"github.com/xh-polaris/psych-post/biz/infra/util"
 	"github.com/xh-polaris/psych-post/pkg/app"
 	"github.com/xh-polaris/psych-post/pkg/core"
@@ -35,11 +36,12 @@ type ConsumeManager struct {
 	ConsumersCount int             // 消费者数量
 
 	ConfigMapper config.IMongoMapper
+	UserMapper   user.IMongoMapper
 	wg           *sync.WaitGroup
 }
 
-func New(consumer int, cfgMapper config.IMongoMapper) *ConsumeManager {
-	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper}
+func New(consumer int, cfgMapper config.IMongoMapper, usrMapper user.IMongoMapper) *ConsumeManager {
+	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper, UserMapper: usrMapper}
 	return cm
 }
 
@@ -68,7 +70,7 @@ func (cm *ConsumeManager) StartConsume() {
 			AckMultiple:   false,
 			MQErrInterval: time.Second * 10,
 		}
-		consumer.Consume(cfg)
+		go consumer.Consume(cfg)
 		cm.wg.Add(1)
 	}
 }
@@ -82,11 +84,9 @@ func (cm *ConsumeManager) Close() {
 }
 
 func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok bool, err error) {
-	var notify *core.PostNotify
-	rptSession := bson.NewObjectID().Hex()
-
 	// 解析消息
-	if err = sonic.Unmarshal(d.Body, &notify); err != nil {
+	notify := &core.PostNotify{}
+	if err = sonic.Unmarshal(d.Body, notify); err != nil {
 		logs.Errorf("[mq consumer] unmarshal err: %s", err)
 		return
 	}
@@ -108,7 +108,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 	// 创建报表处理智能体（实际采用ChatApp，传入ReportApp的AppID）
-	cli, err := app.NewChatApp(ctx, rptSession, reportSetting)
+	cli, err := app.NewChatApp(ctx, notify.Session, reportSetting)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report app err: %s", err)
 		return
@@ -121,7 +121,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 	reverse(msgs) // 按时间顺序正序
 	// 构造报表生成提示词
-	prompt, count, err := buildPrompt(notify, msgs)
+	prompt, count, err := cm.buildPrompt(ctx, notify, msgs)
 	if err != nil {
 		logs.Errorf("[mq consumer] build prompt err: %s", err)
 		return
@@ -132,10 +132,11 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Errorf("[mq consumer] generate err: %s", err)
 		return
 	}
-	// 解析报表，填充报表内容
+	// 解析并填充报表内容
 	clean := cleanJSONString(resp.Content)
-	var result *re.Report
-	if err = sonic.Unmarshal([]byte(clean), &result); err != nil {
+
+	result, err := extraReport(clean)
+	if err != nil {
 		logs.Errorf("[mq consumer] unmarshal err: %s, content: %s", err, clean)
 		return
 	}
@@ -144,6 +145,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	if err != nil {
 		return
 	}
+
 	report := &re.Report{
 		ID:             bson.NewObjectID(),
 		UnitID:         oids[0],
@@ -206,16 +208,25 @@ func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*ap
 	return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
 }
 
-func buildPrompt(notify *core.PostNotify, msgs []*message.Message) ([]*schema.Message, int, error) {
+func (cm *ConsumeManager) buildPrompt(ctx context.Context, notify *core.PostNotify, msgs []*message.Message) ([]*schema.Message, int, error) {
 	var count int
 	var sb strings.Builder
-	infoStr, err := sonic.Marshal(notify.Info)
+
+	// 填充学生信息
+	oid, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId)
 	if err != nil {
+		logs.Errorf("[mq consumer] invalid userId: %s", err)
 		return nil, 0, err
 	}
-	sb.WriteString("额外信息:")
-	sb.WriteString(string(infoStr))
-	sb.WriteString("\n")
+	usr, err := cm.UserMapper.FindOneById(ctx, oid[0])
+	if err != nil {
+		logs.Errorf("[mq consumer] get user err: %s", err)
+		return nil, 0, err
+	}
+
+	infoStr := fmt.Sprintf("学生基本信息:\n学生姓名：%s，%d年级%d班，性别%s。\n", usr.Name, usr.Grade, usr.Class, enum.GenderI2S[usr.Gender])
+	sb.WriteString(infoStr)
+	sb.WriteString("对话内容：\n")
 	for _, m := range msgs {
 		if m.Content != "" { // 消息有效
 			count++
@@ -248,15 +259,51 @@ func cleanJSONString(input string) string {
 	return input
 }
 
-func rptUsage(msg *schema.Message) *core.LLMUsage {
-	return &core.LLMUsage{
-		PromptTokens: msg.ResponseMeta.Usage.PromptTokens,
-		PromptTokenDetails: core.PromptTokenDetails{
-			CachedTokens: msg.ResponseMeta.Usage.PromptTokenDetails.CachedTokens,
-		},
-		CompletionTokens: msg.ResponseMeta.Usage.CompletionTokens,
-		TotalTokens:      msg.ResponseMeta.Usage.TotalTokens,
+func extraReport(s string) (*re.Report, error) {
+	if s == "" {
+		return &re.Report{}, errorx.New(errno.InvalidModelOutPut)
 	}
+
+	// 中间结构体：与 mapper/report.Report 相同，但 emotion 为 string
+	type extra struct {
+		Title     string   `json:"title"`
+		Keywords  []string `json:"keywords,omitempty"`
+		Digest    string   `json:"digest,omitempty"`
+		Emotion   string   `json:"emotion,omitempty"`
+		Body      string   `json:"body,omitempty"`
+		NeedAlarm bool     `json:"need_alarm,omitempty"`
+		// 允许携带额外字段，防止解析失败
+		Extra map[string]interface{} `json:"-"`
+	}
+
+	var e extra
+	if err := sonic.Unmarshal([]byte(s), &e); err != nil {
+		return nil, err
+	}
+
+	rpt := &re.Report{
+		Title:     e.Title,
+		Keywords:  e.Keywords,
+		Digest:    e.Digest,
+		Emotion:   enum.EmotionS2i(e.Emotion),
+		Body:      e.Body,
+		NeedAlarm: e.NeedAlarm,
+	}
+	return rpt, nil
+}
+
+func rptUsage(msg *schema.Message) *core.LLMUsage {
+	if msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
+		return &core.LLMUsage{
+			PromptTokens: msg.ResponseMeta.Usage.PromptTokens,
+			PromptTokenDetails: core.PromptTokenDetails{
+				CachedTokens: msg.ResponseMeta.Usage.PromptTokenDetails.CachedTokens,
+			},
+			CompletionTokens: msg.ResponseMeta.Usage.CompletionTokens,
+			TotalTokens:      msg.ResponseMeta.Usage.TotalTokens,
+		}
+	}
+	return nil
 }
 
 func reverse(msgs []*message.Message) {

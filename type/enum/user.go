@@ -35,3 +35,9 @@ const (
 	UserStatusActive  = 1
 	UserStatusDeleted = 2
 )
+
+var GenderI2S = map[int]string{
+	UserGenderMale:   "男",
+	UserGenderFemale: "女",
+	UserGenderOther:  "未知",
+}
