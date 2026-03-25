@@ -46,13 +46,15 @@ func (c *CozeModel) Generate(ctx context.Context, in []*schema.Message, opts ...
 	e := c2e(cmsg.Messages[0])
 	// 记录用量
 	e.ResponseMeta = &schema.ResponseMeta{
-		FinishReason: cmsg.Chat.LastError.Msg,
 		Usage: &schema.TokenUsage{
 			PromptTokens:     cmsg.Chat.Usage.InputCount,
 			CompletionTokens: cmsg.Chat.Usage.OutputCount,
 			TotalTokens:      cmsg.Chat.Usage.TokenCount,
 		},
 		LogProbs: nil,
+	}
+	if cmsg.Chat.LastError != nil {
+		e.ResponseMeta.FinishReason = cmsg.Chat.LastError.Msg
 	}
 	return e, nil
 }

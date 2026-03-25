@@ -46,7 +46,7 @@ func New(consumer int, cfgMapper config.IMongoMapper, usrMapper user.IMongoMappe
 }
 
 func (cm *ConsumeManager) BuildConsumer() *ConsumeManager {
-	for range cm.Consumers {
+	for range cm.ConsumersCount {
 		cm.Consumers = append(cm.Consumers, mq.NewConsumer(cm.ConnMgr, cm.DoConsume, cm.wg))
 	}
 	return cm
@@ -55,20 +55,21 @@ func (cm *ConsumeManager) BuildConsumer() *ConsumeManager {
 func (cm *ConsumeManager) StartConsume() {
 	for i, consumer := range cm.Consumers {
 		cfg := &mq.ConsumeConfig{
-			PrefetchCount: 1,
-			PrefetchSize:  0,
-			Global:        false,
-			Queue:         "psych.his",
-			Consumer:      fmt.Sprintf("psych.his-%d", i),
-			AutoAck:       false,
-			Exclusive:     false,
-			NoLocal:       false,
-			NoWait:        false,
-			Args:          nil,
-			NackMultiple:  false,
-			NackRequeue:   false,
-			AckMultiple:   false,
-			MQErrInterval: time.Second * 10,
+			PrefetchCount:   1,
+			PrefetchSize:    0,
+			Global:          false,
+			Queue:           conf.GetConfig().RabbitMQ.Queue,
+			Consumer:        fmt.Sprintf("psych-his-%d", i),
+			AutoAck:         false,
+			Exclusive:       false,
+			NoLocal:         false,
+			NoWait:          false,
+			Args:            nil,
+			NackMultiple:    false,
+			NackRequeue:     true,
+			AckMultiple:     false,
+			MQErrInterval:   time.Second * 5,
+			OnceErrInterval: time.Second * 3,
 		}
 		go consumer.Consume(cfg)
 		cm.wg.Add(1)
@@ -213,7 +214,7 @@ func (cm *ConsumeManager) buildPrompt(ctx context.Context, notify *core.PostNoti
 	var sb strings.Builder
 
 	// 填充学生信息
-	oid, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId)
+	oid, err := util.ObjectIDsFromHex(notify.UserId)
 	if err != nil {
 		logs.Errorf("[mq consumer] invalid userId: %s", err)
 		return nil, 0, err
@@ -224,15 +225,15 @@ func (cm *ConsumeManager) buildPrompt(ctx context.Context, notify *core.PostNoti
 		return nil, 0, err
 	}
 
-	infoStr := fmt.Sprintf("学生基本信息:\n学生姓名：%s，%d年级%d班，性别%s。\n", usr.Name, usr.Grade, usr.Class, enum.GenderI2S[usr.Gender])
+	infoStr := fmt.Sprintf("学生基本信息:\n学生姓名:%s\n班级:%d年级%d班\n性别:%s\n", usr.Name, usr.Grade, usr.Class, enum.GenderI2S[usr.Gender])
 	sb.WriteString(infoStr)
 	sb.WriteString("对话内容：\n")
 	for _, m := range msgs {
 		if m.Content != "" { // 消息有效
 			count++
-			sb.WriteString("<|")
+			sb.WriteString("<")
 			sb.WriteString(enum.MsgRoleItoA[m.Role])
-			sb.WriteString("|>")
+			sb.WriteString(">")
 			sb.WriteString(" ")
 			sb.WriteString(m.Content)
 			sb.WriteString("\n")
