@@ -13,7 +13,8 @@ var config *Config
 
 type (
 	RabbitMQ struct {
-		Url string
+		Url   string
+		Queue string
 	}
 
 	MongoDB struct {
@@ -43,7 +44,7 @@ func NewConfig() (*Config, error) {
 	c := new(Config)
 	path := os.Getenv("CONFIG_PATH")
 	if path == "" {
-		path = "etc/conf.yaml"
+		path = "etc/config.yaml"
 	}
 	err := conf.Load(path, c)
 	if err != nil {

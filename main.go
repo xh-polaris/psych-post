@@ -39,9 +39,8 @@ func main() {
 	cfg := conf.GetConfig()
 	mgr := report.New(conf.GetConfig().Consumers, config.NewConfigMongoMapper(cfg), user.NewUserMongoMapper(cfg))
 	mgr.BuildConsumer().StartConsume()
+	defer mgr.Close()
 	osSignalHandler(ctx)
-	mgr.Close()
-	cancel()
 }
 
 // osSignalHandler 处理os信号, 监听命令行中止
