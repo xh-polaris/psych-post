@@ -3,6 +3,7 @@ package application
 import (
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	"github.com/xh-polaris/psych-post/biz/infra/cache"
 	"github.com/xh-polaris/psych-post/biz/infra/cache/redis"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
@@ -24,6 +25,7 @@ func InitAppDependency() {
 	deps.MessageMapper = message.NewMessageMongoMapper(conf.GetConfig())
 	deps.ReportMapper = report.NewConfigMongoMapper(conf.GetConfig())
 	his.New(deps.Cache, deps.MessageMapper)
+	wordcld.NewWordCloudExtractor(deps.ReportMapper)
 	deps.HisMgr = his.Mgr
 	deps.ConnManager = mq.NewConnManager(conf.GetConfig().RabbitMQ.Url)
 }

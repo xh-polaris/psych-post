@@ -12,6 +12,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
@@ -91,7 +92,57 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Errorf("[mq consumer] unmarshal err: %s", err)
 		return
 	}
-	// 获取配置
+
+	// 先做无需模型的部分：MetaInfo、获取历史消息、生成关键词词云并写入初始报表（报表状态为Processing）
+	oids, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId, notify.Session)
+	if err != nil {
+		logs.Errorf("[mq consumer] invalid id in notify: %s", err)
+		return false, err
+	}
+
+	// 获取聊天记录并按时间正序
+	msgs, err := his.Mgr.RetrieveMessage(ctx, notify.Session, -1)
+	if err != nil {
+		logs.Errorf("[mq consumer] retrieve message err: %s", err)
+		return
+	}
+	reverse(msgs)
+
+	// 统计对话轮数
+	rounds := 0
+	for _, m := range msgs {
+		if m.Role == enum.MsgRoleUser && m.Content != "" {
+			rounds++
+		}
+	}
+
+	// 生成关键词词云（来自 domain/wordcld）
+	kwMap, err := wordcld.Extractor.FromHisMsgPercent(msgs)
+	if err != nil {
+		logs.Errorf("[mq consumer] wordcloud extract err: %s", err)
+	}
+
+	// 插入初始报表（Processing），调用模型生成后以 UpdateFields 补全
+	rptID := bson.NewObjectID()
+	initial := &re.Report{
+		ID:             rptID,
+		UnitID:         oids[0],
+		UserID:         oids[1],
+		ConversationID: oids[2],
+		Round:          rounds,
+		Start:          time.Unix(notify.Start, 0),
+		End:            time.Unix(notify.End, 0),
+		Config:         nil,
+		Info:           notify.Info,
+		Keywords:       kwMap,
+		Status:         enum.ReportStatusProcessing,
+	}
+	if err = re.Mapper.InsertOne(ctx, initial); err != nil {
+		logs.Error("[mq consumer] insert initial report err:", err)
+		return
+	}
+
+	// 以下为需要模型的流程：获取配置、创建 client、构造 prompt、调用模型
 	unitOID, err := util.ObjectIDsFromHex(notify.UnitId)
 	if err != nil {
 		logs.Errorf("[mq consumer] invalid unitID from notify")
@@ -102,76 +153,58 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Errorf("[mq consumer] get unit config err: %s", err)
 		return
 	}
-	// 构造完整配置
 	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, notify.UserId)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report config err: %s", err)
 		return
 	}
-	// 创建报表处理智能体（实际采用ChatApp，传入ReportApp的AppID）
 	cli, err := app.NewChatApp(ctx, notify.Session, reportSetting)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report app err: %s", err)
 		return
 	}
-	// 获取聊天记录
-	msgs, err := his.Mgr.RetrieveMessage(ctx, notify.Session, -1)
-	if err != nil {
-		logs.Errorf("[mq consumer] retrieve message err: %s", err)
-		return
-	}
-	reverse(msgs) // 按时间顺序正序
+
 	// 构造报表生成提示词
-	prompt, count, err := cm.buildPrompt(ctx, notify, msgs)
+	prompt, _, err := cm.buildPrompt(ctx, notify, msgs)
 	if err != nil {
 		logs.Errorf("[mq consumer] build prompt err: %s", err)
 		return
 	}
-	// 产生报表
+
+	// 调用模型生成报表
 	resp, err := cli.Generate(ctx, prompt)
 	if err != nil {
 		logs.Errorf("[mq consumer] generate err: %s", err)
 		return
 	}
-	// 解析并填充报表内容
-	clean := cleanJSONString(resp.Content)
 
+	// 解析模型输出
+	clean := cleanJSONString(resp.Content)
 	result, err := extraReport(clean)
 	if err != nil {
 		logs.Errorf("[mq consumer] unmarshal err: %s, content: %s", err, clean)
 		return
 	}
-	// 补充报表meta并存入数据库
-	oids, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId, notify.Session)
-	if err != nil {
+
+	// 使用 UpdateFields 补全初始报表的其余字段
+	update := bson.M{
+		"title":        result.Title,
+		"digest":       result.Digest,
+		"emotion":      result.Emotion,
+		"body":         result.Body,
+		"need_alarm":   result.NeedAlarm,
+		"topics":       result.Topics,
+		"report_usage": rptUsage(resp),
+		"asr_usage":    notify.Usage.ASRUsage,
+		"tts_usage":    notify.Usage.TTSUsage,
+		"status":       enum.ReportStatusSuccess,
+	}
+	if err = re.Mapper.UpdateFields(ctx, rptID, update); err != nil {
+		logs.Error("[mq consumer] update report err:", err)
 		return
 	}
 
-	report := &re.Report{
-		ID:             bson.NewObjectID(),
-		UnitID:         oids[0],
-		UserID:         oids[1],
-		ConversationID: oids[2],
-		ReportUsage:    rptUsage(resp),
-		ASRUsage:       notify.Usage.ASRUsage,
-		TTSUsage:       notify.Usage.TTSUsage,
-		Round:          count,
-		Start:          time.Unix(notify.Start, 0),
-		End:            time.Unix(notify.End, 0),
-		Config:         cfg.Report,
-		Info:           notify.Info,
-		Title:          result.Title,
-		Keywords:       result.Keywords,
-		Digest:         result.Digest,
-		Emotion:        result.Emotion,
-		Body:           result.Body,
-		NeedAlarm:      result.NeedAlarm,
-	}
-	if err = re.Mapper.InsertOne(ctx, report); err != nil {
-		logs.Error("[mq consumer] insert report err:", err)
-		return
-	}
-	// 检查是否需要创建预警
+	// 可能需要创建预警
 	if result.NeedAlarm {
 		al := alarm.Alarm{
 			ID:             bson.NewObjectID(),
@@ -179,7 +212,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 			UserID:         oids[1],
 			ConversationID: oids[2],
 			Emotion:        result.Emotion,
-			Keywords:       result.Keywords,
+			Keywords:       util.KeywordsMap2Slice(initial.Keywords),
 			Status:         enum.AlarmStatusPending,
 			CreateTime:     time.Now(),
 		}
@@ -268,7 +301,7 @@ func extraReport(s string) (*re.Report, error) {
 	// 中间结构体：与 mapper/report.Report 相同，但 emotion 为 string
 	type extra struct {
 		Title     string   `json:"title"`
-		Keywords  []string `json:"keywords,omitempty"`
+		Topics    []string `json:"topics,omitempty"`
 		Digest    string   `json:"digest,omitempty"`
 		Emotion   string   `json:"emotion,omitempty"`
 		Body      string   `json:"body,omitempty"`
@@ -284,7 +317,7 @@ func extraReport(s string) (*re.Report, error) {
 
 	rpt := &re.Report{
 		Title:     e.Title,
-		Keywords:  e.Keywords,
+		Topics:    e.Topics,
 		Digest:    e.Digest,
 		Emotion:   enum.EmotionS2i(e.Emotion),
 		Body:      e.Body,
