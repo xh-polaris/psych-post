@@ -13,7 +13,7 @@ ADD go.mod .
 ADD go.sum .
 RUN go mod download
 RUN mkdir -p /build/dict
-RUN cp -r /go/pkg/mod/github.com/yanyiwu/gojieba@v1.4.6/deps/cppjieba/dict/* /build/dict/ || true
+RUN cp -r /go/pkg/mod/github.com/yanyiwu/gojieba@v1.4.7/deps/cppjieba/dict/* /build/dict/ || true
 
 COPY .. .
 RUN sh ./build.sh
