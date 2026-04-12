@@ -16,6 +16,7 @@ import (
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/conversation"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
 	re "github.com/xh-polaris/psych-post/biz/infra/mapper/report"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/user"
@@ -38,11 +39,12 @@ type ConsumeManager struct {
 
 	ConfigMapper config.IMongoMapper
 	UserMapper   user.IMongoMapper
+	ConvMapper   conversation.IMongoMapper
 	wg           *sync.WaitGroup
 }
 
-func New(consumer int, cfgMapper config.IMongoMapper, usrMapper user.IMongoMapper) *ConsumeManager {
-	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper, UserMapper: usrMapper}
+func New(consumer int, cfgMapper config.IMongoMapper, usrMapper user.IMongoMapper, convMapper conversation.IMongoMapper) *ConsumeManager {
+	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper, UserMapper: usrMapper, ConvMapper: convMapper}
 	return cm
 }
 
@@ -202,6 +204,12 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	if err = re.Mapper.UpdateFields(ctx, rptID, update); err != nil {
 		logs.Error("[mq consumer] update report err:", err)
 		return
+	}
+
+	// 更新会话标题
+	if err = cm.ConvMapper.UpdateFields(ctx, oids[2], bson.M{"title": result.Title}); err != nil {
+		logs.Error("[mq consumer] update conversation title err:", err)
+		// 标题更新失败不影响整体报表生成，继续执行
 	}
 
 	// 可能需要创建预警
