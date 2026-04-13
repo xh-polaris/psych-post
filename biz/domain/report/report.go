@@ -98,8 +98,8 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	// 先做无需模型的部分：MetaInfo、获取历史消息、生成关键词词云并写入初始报表（报表状态为Processing）
 	oids, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId, notify.Session)
 	if err != nil {
-		logs.Errorf("[mq consumer] invalid id in notify: %s", err)
-		return false, err
+		logs.Errorf("[mq consumer] invalid id in notify: %s, notify: %+v", err, notify)
+		return true, nil
 	}
 
 	// 获取聊天记录并按时间正序
