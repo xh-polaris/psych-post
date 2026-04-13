@@ -105,7 +105,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	oids, err := util.ObjectIDsFromHex(unitId, userId, session)
 	if err != nil {
 		logs.Errorf("[mq consumer] invalid id in notify: %s, notify: %+v", err, notify)
-		return true, nil
+		return false, nil
 	}
 
 	// 获取聊天记录并按时间正序
@@ -130,13 +130,15 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Errorf("[mq consumer] wordcloud extract err: %s", err)
 	}
 
+	unitOID, userOID, convOID := oids[0], oids[1], oids[2]
+
 	// 插入初始报表（Processing），调用模型生成后以 UpdateFields 补全
 	rptID := bson.NewObjectID()
 	initial := &re.Report{
 		ID:             rptID,
-		UnitID:         oids[0],
-		UserID:         oids[1],
-		ConversationID: oids[2],
+		UnitID:         unitOID,
+		UserID:         userOID,
+		ConversationID: convOID,
 		Round:          rounds,
 		Start:          time.Unix(notify.Start, 0),
 		End:            time.Unix(notify.End, 0),
@@ -151,22 +153,17 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 以下为需要模型的流程：获取配置、创建 client、构造 prompt、调用模型
-	unitOID, err := util.ObjectIDsFromHex(notify.UnitId)
-	if err != nil {
-		logs.Errorf("[mq consumer] invalid unitID from notify")
-		return false, err
-	}
-	cfg, err := cm.ConfigMapper.FindOneByUnitID(ctx, unitOID[0])
+	cfg, err := cm.ConfigMapper.FindOneByUnitID(ctx, unitOID)
 	if err != nil {
 		logs.Errorf("[mq consumer] get unit config err: %s", err)
 		return
 	}
-	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, notify.UserId)
+	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, userId)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report config err: %s", err)
 		return
 	}
-	cli, err := app.NewChatApp(ctx, notify.Session, reportSetting)
+	cli, err := app.NewChatApp(ctx, session, reportSetting)
 	if err != nil {
 		logs.Errorf("[mq consumer] build report app err: %s", err)
 		return
@@ -222,9 +219,9 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	if result.NeedAlarm {
 		al := alarm.Alarm{
 			ID:             bson.NewObjectID(),
-			UnitID:         oids[0],
-			UserID:         oids[1],
-			ConversationID: oids[2],
+			UnitID:         unitOID,
+			UserID:         userOID,
+			ConversationID: convOID,
 			Emotion:        result.Emotion,
 			Keywords:       util.KeywordsMap2Slice(initial.Keywords),
 			Status:         enum.AlarmStatusPending,
