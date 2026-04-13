@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/xh-polaris/psych-post/biz/conf"
+	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
 	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
@@ -95,15 +96,20 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 
+	// 提取 ID：UserId 和 UnitId 从 Info 字典拿，Session 直接从根层级拿
+	userId, _ := notify.Info[cst.JsonUserID].(string)
+	unitId, _ := notify.Info[cst.JsonUnitID].(string)
+	session := notify.Session
+
 	// 先做无需模型的部分：MetaInfo、获取历史消息、生成关键词词云并写入初始报表（报表状态为Processing）
-	oids, err := util.ObjectIDsFromHex(notify.UnitId, notify.UserId, notify.Session)
+	oids, err := util.ObjectIDsFromHex(unitId, userId, session)
 	if err != nil {
 		logs.Errorf("[mq consumer] invalid id in notify: %s, notify: %+v", err, notify)
 		return true, nil
 	}
 
 	// 获取聊天记录并按时间正序
-	msgs, err := his.Mgr.RetrieveMessage(ctx, notify.Session, -1)
+	msgs, err := his.Mgr.RetrieveMessage(ctx, session, -1)
 	if err != nil {
 		logs.Errorf("[mq consumer] retrieve message err: %s", err)
 		return
