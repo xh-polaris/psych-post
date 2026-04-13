@@ -15,16 +15,28 @@ const (
 	Phone          = "phone"
 	Name           = "name"
 	UnitID         = "unit_id"
-	Gender         = "gender"
-	Birth          = "birth"
-	EnrollYear     = "enroll_year"
-	Grade          = "grade"
-	Class          = "class"
-	Address        = "address"
-	Contact        = "contact"
-	Password       = "password"
-	RiskLevel      = "risk_level"
-	Remark         = "remark"
+)
+
+// json字段枚举
+const (
+	JsonUserID         = "userId"
+	JsonUnitID         = "unitId"
+	JsonConversationID = "conversationId"
+	JsonCode           = "code"
+	JsonRole           = "admin"
+)
+
+const (
+	Gender     = "gender"
+	Birth      = "birth"
+	EnrollYear = "enroll_year"
+	Grade      = "grade"
+	Class      = "class"
+	Address    = "address"
+	Contact    = "contact"
+	Password   = "password"
+	RiskLevel  = "risk_level"
+	Remark     = "remark"
 
 	Status        = "status"
 	DeletedStatus = -1
