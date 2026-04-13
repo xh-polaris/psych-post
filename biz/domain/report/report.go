@@ -170,7 +170,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 构造报表生成提示词
-	prompt, _, err := cm.buildPrompt(ctx, notify, msgs)
+	prompt, _, err := cm.buildPrompt(ctx, userOID, msgs)
 	if err != nil {
 		logs.Errorf("[mq consumer] build prompt err: %s", err)
 		return
@@ -253,17 +253,12 @@ func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*ap
 	return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
 }
 
-func (cm *ConsumeManager) buildPrompt(ctx context.Context, notify *core.PostNotify, msgs []*message.Message) ([]*schema.Message, int, error) {
+func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) ([]*schema.Message, int, error) {
 	var count int
 	var sb strings.Builder
 
 	// 填充学生信息
-	oid, err := util.ObjectIDsFromHex(notify.UserId)
-	if err != nil {
-		logs.Errorf("[mq consumer] invalid userId: %s", err)
-		return nil, 0, err
-	}
-	usr, err := cm.UserMapper.FindOneById(ctx, oid[0])
+	usr, err := cm.UserMapper.FindOneById(ctx, userIdObj)
 	if err != nil {
 		logs.Errorf("[mq consumer] get user err: %s", err)
 		return nil, 0, err
