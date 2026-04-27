@@ -20,7 +20,7 @@ func NewWithAddrAndPassword(addr, password string) cache.Cmdable {
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     addr, // Redis地址
-		DB:       0,    // 默认数据库
+		DB:       conf.GetConfig().Cache.DB,
 		Password: password,
 		// connection pool configuration
 		PoolSize:        100,             // Maximum number of connections (recommended to set to CPU cores * 10)

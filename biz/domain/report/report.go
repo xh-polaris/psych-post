@@ -306,12 +306,13 @@ func extraReport(s string) (*re.Report, error) {
 
 	// 中间结构体：与 mapper/report.Report 相同，但 emotion 为 string
 	type extra struct {
-		Title     string   `json:"title"`
-		Topics    []string `json:"topics,omitempty"`
-		Digest    string   `json:"digest,omitempty"`
-		Emotion   string   `json:"emotion,omitempty"`
-		Body      string   `json:"body,omitempty"`
-		NeedAlarm bool     `json:"need_alarm,omitempty"`
+		Title       string   `json:"title"`
+		Topics      []string `json:"topics,omitempty"`
+		Digest      string   `json:"digest,omitempty"`
+		Emotion     string   `json:"emotion,omitempty"`
+		Body        string   `json:"body,omitempty"`
+		Suggestions []string `json:"suggestions,omitempty"`
+		NeedAlarm   bool     `json:"need_alarm,omitempty"`
 		// 允许携带额外字段，防止解析失败
 		Extra map[string]interface{} `json:"-"`
 	}
@@ -322,12 +323,13 @@ func extraReport(s string) (*re.Report, error) {
 	}
 
 	rpt := &re.Report{
-		Title:     e.Title,
-		Topics:    e.Topics,
-		Digest:    e.Digest,
-		Emotion:   enum.EmotionS2i(e.Emotion),
-		Body:      e.Body,
-		NeedAlarm: e.NeedAlarm,
+		Title:       e.Title,
+		Topics:      e.Topics,
+		Digest:      e.Digest,
+		Emotion:     enum.EmotionS2i(e.Emotion),
+		Body:        e.Body,
+		Suggestions: e.Suggestions,
+		NeedAlarm:   e.NeedAlarm,
 	}
 	return rpt, nil
 }

@@ -25,6 +25,7 @@ type (
 	Cache struct {
 		Addr     string
 		Password string
+		DB       int `json:"DB,omitempty,default=0"`
 	}
 
 	Config struct {
