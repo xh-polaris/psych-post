@@ -202,6 +202,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		"report_usage": rptUsage(resp),
 		"asr_usage":    notify.Usage.ASRUsage,
 		"tts_usage":    notify.Usage.TTSUsage,
+		"suggestions":  result.Suggestions,
 		"status":       enum.ReportStatusSuccess,
 	}
 	if err = re.Mapper.UpdateFields(ctx, rptID, update); err != nil {
