@@ -34,17 +34,6 @@ var (
 	whitespaceRegex  = regexp.MustCompile(`\s+`)
 )
 
-// 内置默认停用词表
-var defaultStopWords = []string{
-	"的", "了", "在", "是", "我", "你", "他", "她", "它",
-	"我们", "你们", "他们", "一个", "一些", "什么", "怎么", "这个", "那个",
-	"有", "没有", "会", "不会", "可以", "不可以", "能", "不能",
-	"很", "非常", "特别", "真的", "确实", "应该", "可能", "或者",
-	"但是", "不过", "然后", "所以", "因为", "如果", "虽然", "虽说",
-	"就是", "只是", "还是", "还有", "而且", "并且", "或", "和",
-	"啊", "呀", "哦", "嗯", "呢", "吧", "吗", "呗", "哈", "嘿",
-}
-
 // loadStopWords 加载停用词列表
 func loadStopWords() {
 	stopWords = make(map[string]struct{})
@@ -52,27 +41,18 @@ func loadStopWords() {
 	// 尝试从配置文件加载
 	stopWordsPath := os.Getenv("STOPWORDS_PATH")
 	if stopWordsPath == "" {
-		stopWordsPath = "etc/stopwords.txt"
+		stopWordsPath = "etc/stopwords_full.txt"
 	}
 
 	// 尝试相对于工作目录和可执行文件目录
 	paths := []string{
 		stopWordsPath,
-		filepath.Join("etc", "stopwords.txt"),
+		filepath.Join("etc", "stopwords_full.txt"),
 	}
 
-	loaded := false
 	for _, path := range paths {
 		if err := loadStopWordsFromFile(path); err == nil {
-			loaded = true
-			break
-		}
-	}
-
-	// 如果没有成功从文件加载，使用默认停用词表
-	if !loaded {
-		for _, word := range defaultStopWords {
-			stopWords[strings.TrimSpace(word)] = struct{}{}
+			return
 		}
 	}
 }
@@ -88,14 +68,9 @@ func loadStopWordsFromFile(path string) error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		word := strings.TrimSpace(scanner.Text())
-		if word != "" && !strings.HasPrefix(word, "#") { // 支持注释行
+		if word != "" && !strings.HasPrefix(word, "#") {
 			stopWords[word] = struct{}{}
 		}
-	}
-
-	// 添加默认停用词以确保基本覆盖
-	for _, word := range defaultStopWords {
-		stopWords[strings.TrimSpace(word)] = struct{}{}
 	}
 
 	return scanner.Err()
@@ -177,7 +152,8 @@ func (wce *WordCloudExtractor) FromHisMsgCount(msgs []*message.Message) (*WordCo
 		return &WordCountResult{Total: 0, Items: make(map[string]int32)}, nil
 	}
 
-	words := wce.jieba.Cut(text, true)
+	// 使用 TF-IDF 提取关键词（top 50）
+	words := wce.jieba.Extract(text, 50)
 	wordCounts := make(map[string]int32)
 	for _, word := range words {
 		normalizedWord := normalizeWord(word)
