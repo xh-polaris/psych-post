@@ -3,7 +3,7 @@ FROM golang:1.25-alpine AS builder
 LABEL stage=gobuilder
 
 ENV CGO_ENABLED 1
-#ENV GOPROXY https://goproxy.cn,direct
+ENV GOPROXY https://goproxy.cn,direct
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 RUN apk update --no-cache && apk add --no-cache tzdata gcc musl-dev g++ make cmake
