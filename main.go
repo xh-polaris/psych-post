@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/common/json"
@@ -35,6 +36,10 @@ func Init() {
 func main() {
 	// 启动后处理程序
 	Init()
+	
+	// 启动http server，用于health check
+	go startHealthServer()
+	time.Sleep(100 * time.Millisecond)
 
 	// 监听命令行以退出
 	ctx, cancel := context.WithCancel(context.Background())
@@ -45,7 +50,6 @@ func main() {
 	defer mgr.Close()
 	osSignalHandler(ctx)
 
-	go startHealthServer()
 }
 
 // osSignalHandler 处理os信号, 监听命令行中止
