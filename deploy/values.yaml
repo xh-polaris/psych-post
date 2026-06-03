@@ -1,0 +1,7 @@
+replicaCount: 1
+image:
+  repository: harbor.harbor/psych/psych-post
+volumeMounts:
+  - name: config
+    mountPath: /app/etc/config.yaml
+    subPath: config.yaml
