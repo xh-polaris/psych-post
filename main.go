@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/cloudwego/hertz/pkg/common/json"
 	logx "github.com/xh-polaris/gopkg/util/log"
 	"github.com/xh-polaris/psych-post/biz/application"
 	"github.com/xh-polaris/psych-post/biz/conf"
@@ -42,6 +44,8 @@ func main() {
 	mgr.BuildConsumer().StartConsume()
 	defer mgr.Close()
 	osSignalHandler(ctx)
+
+	go startHealthServer()
 }
 
 // osSignalHandler 处理os信号, 监听命令行中止
@@ -50,4 +54,49 @@ func osSignalHandler(ctx context.Context) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	logx.CtxInfo(ctx, "[osSignalHandler] receive signal:[%v]", <-ch)
+}
+
+// 添加健康检查 HTTP 服务
+func startHealthServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", healthz)
+
+	hlog.Info("Health check server starting on :8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		hlog.Errorf("Health check server failed: %v", err)
+	}
+}
+
+// healthz 健康检查处理函数
+func healthz(w http.ResponseWriter, r *http.Request) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	response := map[string]interface{}{
+		"status":  "ok",
+		"message": "healthz",
+		"pid":     os.Getpid(),
+		// Go runtime
+		"go_version": runtime.Version(),
+		"gomaxprocs": runtime.GOMAXPROCS(0),
+		"goroutines": runtime.NumGoroutine(),
+		"num_cpu":    runtime.NumCPU(),
+		"memory": map[string]interface{}{
+			"alloc":        m.Alloc,
+			"total_alloc":  m.TotalAlloc,
+			"sys":          m.Sys,
+			"heap_alloc":   m.HeapAlloc,
+			"heap_sys":     m.HeapSys,
+			"heap_idle":    m.HeapIdle,
+			"heap_inuse":   m.HeapInuse,
+			"heap_objects": m.HeapObjects,
+			"gc_num":       m.NumGC,
+			"gc_pause_ns":  m.PauseTotalNs,
+		},
+	}
+
+	_ = json.NewEncoder(w).Encode(response)
 }
