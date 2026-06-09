@@ -23,6 +23,7 @@ const (
 
 type IMongoMapper interface {
 	RetrieveMessage(ctx context.Context, conversation string, size int) ([]*Message, error)
+	FindByConversationIds(ctx context.Context, convIds []bson.ObjectID, opts options.Lister[options.FindOptions]) ([]*Message, error)
 	Insert(ctx context.Context, msg *Message) error
 }
 
@@ -48,6 +49,21 @@ func (m *mongoMapper) RetrieveMessage(ctx context.Context, conversation string, 
 	if err = m.conn.Find(ctx, &msgs, bson.M{cst.ConversationID: oid, cst.Status: bson.M{cst.NE: cst.DeletedStatus}},
 		opts); err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		logs.Errorf("[message mapper] find err:%s", errorx.ErrorWithoutStack(err))
+		return nil, err
+	}
+	return msgs, nil
+}
+
+func (m *mongoMapper) FindByConversationIds(ctx context.Context, convIds []bson.ObjectID, opts options.Lister[options.FindOptions]) ([]*Message, error) {
+	if len(convIds) == 0 {
+		return []*Message{}, nil
+	}
+	var msgs []*Message
+	if err := m.conn.Find(ctx, &msgs, bson.M{
+		cst.ConversationID: bson.M{cst.In: convIds},
+		cst.Status:         bson.M{cst.NE: cst.DeletedStatus},
+	}, opts); err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		logs.Errorf("[message mapper] find by conversation ids err:%s", errorx.ErrorWithoutStack(err))
 		return nil, err
 	}
 	return msgs, nil

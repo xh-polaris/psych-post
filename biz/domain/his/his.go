@@ -2,60 +2,123 @@ package his
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/xh-polaris/psych-post/biz/infra/cache"
+	"github.com/xh-polaris/psych-post/biz/infra/mapper/conversation"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
+	"github.com/xh-polaris/psych-post/biz/infra/util"
 	"github.com/xh-polaris/psych-post/pkg/errorx"
 	"github.com/xh-polaris/psych-post/pkg/logs"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var Mgr *HistoryManager
 
 const cachePrefix = "psych:msg:"
 
-// HistoryManager 历史记录管理, 所有的历史记录都按照从旧到新排序
 type HistoryManager struct {
-	cache  cache.Cmdable
-	mapper message.IMongoMapper
+	cache      cache.Cmdable
+	mapper     message.IMongoMapper
+	convMapper conversation.IMongoMapper
 }
 
-// New 创建一个新的历史记录管理器
-func New(cache cache.Cmdable, mapper message.IMongoMapper) {
-	Mgr = &HistoryManager{cache: cache, mapper: mapper}
+func New(c cache.Cmdable, m message.IMongoMapper, convMapper conversation.IMongoMapper) {
+	Mgr = &HistoryManager{cache: c, mapper: m, convMapper: convMapper}
 }
 
-// RetrieveMessage 获取消息, size 小于等于0时取出所有
-func (h *HistoryManager) RetrieveMessage(ctx context.Context, id string, size int) (msgs []*message.Message, err error) {
-	// retrieve cache
-	if msgs, err = h.RetrieveMessageFromCache(ctx, cachePrefix+id); err == nil {
-		if size >= 0 && len(msgs) > size {
-			return msgs[:size], nil
-		}
+func dailyCacheKey(userId, date string) string {
+	return cachePrefix + userId + ":" + date
+}
+
+func hashField(convId string, index int) string {
+	return convId + ":" + strconv.Itoa(index)
+}
+
+func (h *HistoryManager) GetUserDailyMessages(ctx context.Context, userId, date string) ([]*message.Message, error) {
+	key := dailyCacheKey(userId, date)
+	if msgs, err := h.RetrieveMessageFromCache(ctx, key); err == nil {
 		return msgs, nil
 	}
-	// retrieve storage
-	if msgs, err = h.mapper.RetrieveMessage(ctx, id, size); err != nil {
+
+	userOid, err := bson.ObjectIDFromHex(userId)
+	if err != nil {
 		return nil, err
 	}
-	// build cache
-	if len(msgs) > 0 {
-		if err = h.CacheMessage(ctx, cachePrefix+id, msgs); err != nil {
-			logs.Errorf("cache msgs err: %s", err)
-		}
+
+	start, end, err := util.DayToUTCRange(date)
+	if err != nil {
+		return nil, err
 	}
+
+	convs, err := h.convMapper.FindByUserIdAndTimeRange(ctx, userOid, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if len(convs) == 0 {
+		return []*message.Message{}, nil
+	}
+
+	convIds := make([]bson.ObjectID, len(convs))
+	for i, conv := range convs {
+		convIds[i] = conv.ID
+	}
+
+	msgs, err := h.mapper.FindByConversationIds(ctx, convIds, options.Find().SetSort(bson.M{"create_time": 1}))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(msgs) > 0 {
+		_ = h.CacheDailyMessages(ctx, userId, date, msgs)
+	}
+
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].CreateTime.After(msgs[j].CreateTime) })
 	return msgs, nil
 }
 
-// RetrieveMessageFromCache 从内存中获取
+func (h *HistoryManager) RetrieveMessage(ctx context.Context, convId string, size int) ([]*message.Message, error) {
+	oid, err := bson.ObjectIDFromHex(convId)
+	if err != nil {
+		return nil, err
+	}
+
+	conv, err := h.convMapper.FindOneById(ctx, oid)
+	if err != nil || conv == nil {
+		return h.mapper.RetrieveMessage(ctx, convId, size)
+	}
+
+	date := util.FormatDateUTC8(conv.CreateTime)
+	userId := conv.UserID.Hex()
+
+	key := dailyCacheKey(userId, date)
+	if cached, cacheErr := h.RetrieveMessageFromCache(ctx, key); cacheErr == nil {
+		filtered := make([]*message.Message, 0)
+		for _, m := range cached {
+			if m.ConversationId.Hex() == convId {
+				filtered = append(filtered, m)
+			}
+		}
+		if size > 0 && len(filtered) > size {
+			return filtered[:size], nil
+		}
+		return filtered, nil
+	}
+
+	return h.mapper.RetrieveMessage(ctx, convId, size)
+}
+
 func (h *HistoryManager) RetrieveMessageFromCache(ctx context.Context, key string) ([]*message.Message, error) {
 	result, err := h.cache.HGetAll(ctx, key).Result()
 	if err != nil {
 		return nil, err
-	} else if len(result) == 0 {
+	}
+	if len(result) == 0 {
 		return nil, cache.Nil
 	}
 
@@ -63,44 +126,54 @@ func (h *HistoryManager) RetrieveMessageFromCache(ctx context.Context, key strin
 	for _, data := range result {
 		var msg message.Message
 		if err = sonic.Unmarshal([]byte(data), &msg); err != nil {
-			logs.Errorf("[message mapper] listAllMsg: json.Unmarshal err:%s", errorx.ErrorWithoutStack(err))
+			logs.Errorf("[his] unmarshal msg err: %s", errorx.ErrorWithoutStack(err))
 			return nil, err
 		}
 		msgs = append(msgs, &msg)
 	}
 	if len(msgs) > 0 {
-		sort.Slice(msgs, func(i, j int) bool { return msgs[i].Index > msgs[j].Index }) // 倒序
+		sort.Slice(msgs, func(i, j int) bool { return msgs[i].CreateTime.After(msgs[j].CreateTime) })
 	}
 	return msgs, nil
 }
 
-// CacheMessage 缓存一批历史记录
-func (h *HistoryManager) CacheMessage(ctx context.Context, key string, msgs []*message.Message) (err error) {
+func (h *HistoryManager) CacheDailyMessages(ctx context.Context, userId, date string, msgs []*message.Message) error {
+	key := dailyCacheKey(userId, date)
 	fields := make(map[string]string, len(msgs))
 	for _, msg := range msgs {
-		var data []byte
-		if data, err = sonic.Marshal(msg); err != nil {
+		data, err := sonic.Marshal(msg)
+		if err != nil {
 			return err
 		}
-		fields[key+strconv.Itoa(int(msg.Index))] = string(data)
+		fields[hashField(msg.ConversationId.Hex(), int(msg.Index))] = string(data)
 	}
 	p := h.cache.Pipeline()
 	p.HSet(ctx, key, fields)
 	p.Expire(ctx, key, time.Hour*6)
-
-	_, err = p.Exec(ctx)
-	return
+	_, err := p.Exec(ctx)
+	return err
 }
 
-// AddMessage 新增消息
-func (h *HistoryManager) AddMessage(ctx context.Context, id string, msg *message.Message) (err error) {
-	// add to storage
-	if err = h.mapper.Insert(ctx, msg); err != nil {
+func (h *HistoryManager) CacheMessage(ctx context.Context, key string, msgs []*message.Message) error {
+	fields := make(map[string]string, len(msgs))
+	for _, msg := range msgs {
+		data, err := sonic.Marshal(msg)
+		if err != nil {
+			return err
+		}
+		fields[fmt.Sprintf("%s%d", key, msg.Index)] = string(data)
+	}
+	p := h.cache.Pipeline()
+	p.HSet(ctx, key, fields)
+	p.Expire(ctx, key, time.Hour*6)
+	_, err := p.Exec(ctx)
+	return err
+}
+
+func (h *HistoryManager) AddMessage(ctx context.Context, id string, msg *message.Message) error {
+	if err := h.mapper.Insert(ctx, msg); err != nil {
 		logs.Errorf("add message err: %s", err)
 	}
-	// add to cache
-	if err = h.CacheMessage(ctx, cachePrefix+id, []*message.Message{msg}); err != nil {
-		logs.Errorf("cache msgs err: %s", err)
-	}
-	return
+	_ = h.CacheMessage(ctx, cachePrefix+id, []*message.Message{msg})
+	return nil
 }

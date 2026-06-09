@@ -108,10 +108,10 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return false, nil
 	}
 
-	// 获取聊天记录并按时间正序
-	msgs, err := his.Mgr.RetrieveMessage(ctx, session, -1)
+	// 获取当天该用户所有消息并按时间正序
+	msgs, err := his.Mgr.GetUserDailyMessages(ctx, userId, notify.Date)
 	if err != nil {
-		logs.Errorf("[mq consumer] retrieve message err: %s", err)
+		logs.Errorf("[mq consumer] retrieve daily messages err: %s", err)
 		return
 	}
 	reverse(msgs)
@@ -146,6 +146,15 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		Info:           notify.Info,
 		Keywords:       kwMap,
 		Status:         enum.ReportStatusProcessing,
+	}
+	if notify.Character != nil {
+		id, _ := bson.ObjectIDFromHex(notify.Character.Id)
+		initial.Character = &config.Character{
+			ID:    id,
+			Name:  notify.Character.Name,
+			Voice: notify.Character.Voice,
+			Image: notify.Character.Image,
+		}
 	}
 	if err = re.Mapper.InsertOne(ctx, initial); err != nil {
 		logs.Error("[mq consumer] insert initial report err:", err)

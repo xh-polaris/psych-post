@@ -48,6 +48,8 @@ const (
 	NE        = "$ne"
 	LT        = "$lt"
 	GT        = "$gt"
+	GTE       = "$gte"
+	LTE       = "$lte"
 	In        = "$in"
 	Set       = "$set"
 	Text      = "$text"
