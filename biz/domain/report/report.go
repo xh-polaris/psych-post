@@ -1,10 +1,12 @@
 package report
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -13,6 +15,7 @@ import (
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	"github.com/xh-polaris/psych-post/biz/domain/prompt"
 	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
@@ -179,10 +182,18 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 构造报表生成提示词
-	prompt, _, err := cm.buildPrompt(ctx, userOID, msgs)
+	prompt, msgCount, err := cm.buildPrompt(ctx, userOID, msgs)
 	if err != nil {
 		logs.Errorf("[mq consumer] build prompt err: %s", err)
 		return
+	}
+	_ = msgCount
+
+	// 尝试从 prompt 管理器获取 report/post 阶段的模板作为 system prompt
+	if sysPrompt, err := cm.buildSystemPrompt(ctx, userOID, msgs, unitOID); err == nil && sysPrompt != nil {
+		prompt = append([]*schema.Message{sysPrompt}, prompt...)
+	} else if err != nil {
+		logs.Errorf("[mq consumer] build system prompt err: %s", err)
 	}
 
 	// 调用模型生成报表
@@ -289,6 +300,70 @@ func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.Object
 		}
 	}
 	return []*schema.Message{schema.UserMessage(sb.String())}, count, nil
+}
+
+type promptMsg struct {
+	Role    string
+	Content string
+	Index   int
+}
+
+func (cm *ConsumeManager) buildSystemPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message, unitOID bson.ObjectID) (*schema.Message, error) {
+	tpl, err := prompt.Mgr.GetReports(ctx, &unitOID)
+	if err != nil {
+		return nil, err
+	}
+	if tpl == "" {
+		tpl, err = prompt.Mgr.GetTemplates(ctx, "post", &unitOID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if tpl == "" {
+		return nil, nil
+	}
+
+	usr, err := cm.UserMapper.FindOneById(ctx, userIdObj)
+	if err != nil {
+		return nil, err
+	}
+
+	pmsgs := make([]promptMsg, 0, len(msgs))
+	for i, m := range msgs {
+		if m.Content != "" {
+			pmsgs = append(pmsgs, promptMsg{
+				Role:    enum.MsgRoleItoA[m.Role],
+				Content: m.Content,
+				Index:   i,
+			})
+		}
+	}
+
+	data := map[string]interface{}{
+		"StudentName": usr.Name,
+		"Grade":       usr.Grade,
+		"Class":       usr.Class,
+		"Gender":      enum.GenderI2S[usr.Gender],
+		"Messages":    pmsgs,
+	}
+
+	tmpl, err := template.New("report").Parse(tpl)
+	if err != nil {
+		logs.Errorf("[mq consumer] parse prompt template err: %s", err)
+		return nil, nil
+	}
+
+	var buf bytes.Buffer
+	if err = tmpl.Execute(&buf, data); err != nil {
+		logs.Errorf("[mq consumer] execute prompt template err: %s", err)
+		return nil, nil
+	}
+
+	content := strings.TrimSpace(buf.String())
+	if content == "" {
+		return nil, nil
+	}
+	return schema.SystemMessage(content), nil
 }
 
 func cleanJSONString(input string) string {
