@@ -18,6 +18,7 @@ import (
 	"github.com/xh-polaris/psych-post/biz/domain/prompt"
 	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
+	impl "github.com/xh-polaris/psych-post/biz/infra/llm/impl"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/conversation"
@@ -263,9 +264,14 @@ func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*ap
 	}
 	// 传入ReportApp的AppID
 	if cc, ok := c.ModelConfig.Chat[rptConf.Provider]; ok {
+		model := ""
+		if rptConf.Provider == impl.DeepSeek {
+			model = impl.DefaultDeepSeekModel
+		}
 		return &app.ChatSetting{
 			Provider:  rptConf.Provider,
 			Url:       cc.URL,
+			Model:     model,
 			BotId:     rptConf.AppID,
 			UserId:    uid,
 			AccessKey: cc.AccessKey,
