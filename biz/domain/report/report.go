@@ -165,16 +165,18 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 
-	// 以下为需要模型的流程：获取配置、创建 client、构造 prompt、调用模型
-	cfg, err := cm.ConfigMapper.FindOneByUnitID(ctx, unitOID)
-	if err != nil {
-		logs.Errorf("[mq consumer] get unit config err: %s", err)
+	// 构建 ChatSetting：provider 固定为 deepseek，凭证从 YAML 读
+	dsCfg, ok := conf.GetConfig().ModelConfig.Chat[impl.DeepSeek]
+	if !ok {
+		logs.Errorf("[mq consumer] deepseek config not found in YAML")
 		return
 	}
-	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, userId)
-	if err != nil {
-		logs.Errorf("[mq consumer] build report config err: %s", err)
-		return
+	reportSetting := &app.ChatSetting{
+		Provider:  impl.DeepSeek,
+		Url:       dsCfg.URL,
+		Model:     impl.DefaultDeepSeekModel,
+		AccessKey: dsCfg.AccessKey,
+		UserId:    userId,
 	}
 	cli, err := app.NewChatApp(ctx, session, reportSetting)
 	if err != nil {
@@ -266,28 +268,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	return true, nil
-}
-
-func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*app.ChatSetting, error) {
-	if rptConf == nil {
-		return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
-	}
-	// 传入ReportApp的AppID
-	if cc, ok := c.ModelConfig.Chat[rptConf.Provider]; ok {
-		model := ""
-		if rptConf.Provider == impl.DeepSeek {
-			model = impl.DefaultDeepSeekModel
-		}
-		return &app.ChatSetting{
-			Provider:  rptConf.Provider,
-			Url:       cc.URL,
-			Model:     model,
-			BotId:     rptConf.AppID,
-			UserId:    uid,
-			AccessKey: cc.AccessKey,
-		}, nil
-	}
-	return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
 }
 
 func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) ([]*schema.Message, int, error) {
