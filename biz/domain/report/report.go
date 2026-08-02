@@ -1,10 +1,12 @@
 package report
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -13,8 +15,10 @@ import (
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	"github.com/xh-polaris/psych-post/biz/domain/prompt"
 	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
+	impl "github.com/xh-polaris/psych-post/biz/infra/llm/impl"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/conversation"
@@ -161,16 +165,18 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return
 	}
 
-	// 以下为需要模型的流程：获取配置、创建 client、构造 prompt、调用模型
-	cfg, err := cm.ConfigMapper.FindOneByUnitID(ctx, unitOID)
-	if err != nil {
-		logs.Errorf("[mq consumer] get unit config err: %s", err)
+	// 构建 ChatSetting：provider 固定为 deepseek，凭证从 YAML 读
+	dsCfg, ok := conf.GetConfig().ModelConfig.Chat[impl.DeepSeek]
+	if !ok {
+		logs.Errorf("[mq consumer] deepseek config not found in YAML")
 		return
 	}
-	reportSetting, err := buildReportSetting(conf.GetConfig(), cfg.Report, userId)
-	if err != nil {
-		logs.Errorf("[mq consumer] build report config err: %s", err)
-		return
+	reportSetting := &app.ChatSetting{
+		Provider:  impl.DeepSeek,
+		Url:       dsCfg.URL,
+		Model:     impl.DefaultDeepSeekModel,
+		AccessKey: dsCfg.AccessKey,
+		UserId:    userId,
 	}
 	cli, err := app.NewChatApp(ctx, session, reportSetting)
 	if err != nil {
@@ -179,40 +185,58 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 构造报表生成提示词
-	prompt, _, err := cm.buildPrompt(ctx, userOID, msgs)
+	prompt, msgCount, err := cm.buildPrompt(ctx, userOID, msgs)
 	if err != nil {
 		logs.Errorf("[mq consumer] build prompt err: %s", err)
 		return
 	}
+	_ = msgCount
 
-	// 调用模型生成报表
-	resp, err := cli.Generate(ctx, prompt)
-	if err != nil {
-		logs.Errorf("[mq consumer] generate err: %s", err)
-		return
+	// 尝试从 prompt 管理器获取 report/post 阶段的模板作为 system prompt
+	if sysPrompt, err := cm.buildSystemPrompt(ctx, userOID, msgs); err == nil && sysPrompt != nil {
+		prompt = append([]*schema.Message{sysPrompt}, prompt...)
+	} else if err != nil {
+		logs.Errorf("[mq consumer] build system prompt err: %s", err)
 	}
 
-	// 解析模型输出
-	clean := cleanJSONString(resp.Content)
-	result, err := extraReport(clean)
-	if err != nil {
-		logs.Errorf("[mq consumer] unmarshal err: %s, content: %s", err, clean)
+	// 调用模型生成报表，解析失败则重试1次
+	var result *re.Report
+	var reportUsage *core.LLMUsage
+	var raw string
+	for attempt := 0; attempt < cst.RetryTimes; attempt++ {
+		resp, genErr := cli.Generate(ctx, prompt)
+		if genErr != nil {
+			logs.Errorf("[mq consumer] generate err: %s", genErr)
+			err = genErr
+			return
+		}
+		reportUsage = rptUsage(resp)
+		raw = resp.Content
+		clean := cleanJSONString(raw)
+		result, err = extraReport(clean)
+		if err == nil {
+			break
+		}
+		logs.Errorf("[mq consumer] unmarshal err (attempt %d): %s", attempt+1, err)
+	}
+	if result == nil {
+		logs.Errorf("[mq consumer] unmarshal failed after retry")
+		logs.Info("[mq consumer] raw llm output: %s", raw)
 		return
 	}
 
 	// 使用 UpdateFields 补全初始报表的其余字段
 	update := bson.M{
-		"title":        result.Title,
-		"digest":       result.Digest,
-		"emotion":      result.Emotion,
-		"body":         result.Body,
-		"need_alarm":   result.NeedAlarm,
-		"topics":       result.Topics,
-		"report_usage": rptUsage(resp),
-		"asr_usage":    notify.Usage.ASRUsage,
-		"tts_usage":    notify.Usage.TTSUsage,
-		"suggestions":  result.Suggestions,
-		"status":       enum.ReportStatusSuccess,
+		"title":         result.Title,
+		"digest":        result.Digest,
+		"analysis":      result.Analysis,
+		"simple_report": result.SimpleReport,
+		"need_alarm":    result.NeedAlarm,
+		"emotion":       result.Emotion,
+		"report_usage":  reportUsage,
+		"asr_usage":     notify.Usage.ASRUsage,
+		"tts_usage":     notify.Usage.TTSUsage,
+		"status":        enum.ReportStatusSuccess,
 	}
 	if err = re.Mapper.UpdateFields(ctx, rptID, update); err != nil {
 		logs.Error("[mq consumer] update report err:", err)
@@ -246,23 +270,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	return true, nil
 }
 
-func buildReportSetting(c *conf.Config, rptConf *config.Report, uid string) (*app.ChatSetting, error) {
-	if rptConf == nil {
-		return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
-	}
-	// 传入ReportApp的AppID
-	if cc, ok := c.ModelConfig.Chat[rptConf.Provider]; ok {
-		return &app.ChatSetting{
-			Provider:  rptConf.Provider,
-			Url:       cc.URL,
-			BotId:     rptConf.AppID,
-			UserId:    uid,
-			AccessKey: cc.AccessKey,
-		}, nil
-	}
-	return nil, errorx.New(errno.ConfigErr, errorx.KV("app", "chat"))
-}
-
 func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) ([]*schema.Message, int, error) {
 	var count int
 	var sb strings.Builder
@@ -291,6 +298,70 @@ func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.Object
 	return []*schema.Message{schema.UserMessage(sb.String())}, count, nil
 }
 
+type promptMsg struct {
+	Role    string
+	Content string
+	Index   int
+}
+
+func (cm *ConsumeManager) buildSystemPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) (*schema.Message, error) {
+	p, err := prompt.Mgr.GetReports(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if p == "" {
+		p, err = prompt.Mgr.GetTemplates(ctx, "post", nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if p == "" {
+		return nil, nil
+	}
+
+	usr, err := cm.UserMapper.FindOneById(ctx, userIdObj)
+	if err != nil {
+		return nil, err
+	}
+
+	pmsgs := make([]promptMsg, 0, len(msgs))
+	for i, m := range msgs {
+		if m.Content != "" {
+			pmsgs = append(pmsgs, promptMsg{
+				Role:    enum.MsgRoleItoA[m.Role],
+				Content: m.Content,
+				Index:   i,
+			})
+		}
+	}
+
+	data := map[string]interface{}{
+		"StudentName": usr.Name,
+		"Grade":       usr.Grade,
+		"Class":       usr.Class,
+		"Gender":      enum.GenderI2S[usr.Gender],
+		"Messages":    pmsgs,
+	}
+
+	tmpl, err := template.New("report").Parse(p)
+	if err != nil {
+		logs.Errorf("[mq consumer] parse prompt template err: %s", err)
+		return nil, nil
+	}
+
+	var buf bytes.Buffer
+	if err = tmpl.Execute(&buf, data); err != nil {
+		logs.Errorf("[mq consumer] execute prompt template err: %s", err)
+		return nil, nil
+	}
+
+	content := strings.TrimSpace(buf.String())
+	if content == "" {
+		return nil, nil
+	}
+	return schema.SystemMessage(content), nil
+}
+
 func cleanJSONString(input string) string {
 	// 以```json\n 开头
 	if strings.HasPrefix(input, "```json") {
@@ -314,17 +385,12 @@ func extraReport(s string) (*re.Report, error) {
 		return &re.Report{}, errorx.New(errno.InvalidModelOutPut)
 	}
 
-	// 中间结构体：与 mapper/report.Report 相同，但 emotion 为 string
 	type extra struct {
-		Title       string   `json:"title"`
-		Topics      []string `json:"topics,omitempty"`
-		Digest      string   `json:"digest,omitempty"`
-		Emotion     string   `json:"emotion,omitempty"`
-		Body        string   `json:"body,omitempty"`
-		Suggestions []string `json:"suggestions,omitempty"`
-		NeedAlarm   bool     `json:"need_alarm,omitempty"`
-		// 允许携带额外字段，防止解析失败
-		Extra map[string]interface{} `json:"-"`
+		Title        string           `json:"title"`
+		Digest       string           `json:"digest,omitempty"`
+		Analysis     *re.Analysis     `json:"analysis,omitempty"`
+		SimpleReport *re.SimpleReport `json:"simple_report,omitempty"`
+		ReportAlt    *re.SimpleReport `json:"report,omitempty"`
 	}
 
 	var e extra
@@ -332,16 +398,38 @@ func extraReport(s string) (*re.Report, error) {
 		return nil, err
 	}
 
-	rpt := &re.Report{
-		Title:       e.Title,
-		Topics:      e.Topics,
-		Digest:      e.Digest,
-		Emotion:     enum.EmotionS2i(e.Emotion),
-		Body:        e.Body,
-		Suggestions: e.Suggestions,
-		NeedAlarm:   e.NeedAlarm,
+	simpleReport := e.SimpleReport
+	if simpleReport == nil {
+		simpleReport = e.ReportAlt
 	}
-	return rpt, nil
+
+	needAlarm, emotion := deriveAlarm(simpleReport)
+
+	return &re.Report{
+		Title:        e.Title,
+		Digest:       e.Digest,
+		Analysis:     e.Analysis,
+		SimpleReport: simpleReport,
+		NeedAlarm:    needAlarm,
+		Emotion:      emotion,
+	}, nil
+}
+
+func deriveAlarm(rpt *re.SimpleReport) (needAlarm bool, emotion int) {
+	if rpt == nil {
+		return false, enum.UnknownEmotion
+	}
+	level := strings.TrimSpace(rpt.RiskObservation.Level)
+	switch {
+	case strings.Contains(level, "高危") || strings.Contains(level, "严重") || strings.Contains(level, "紧急"):
+		return true, enum.AlarmEmotionDanger
+	case strings.Contains(level, "中") || strings.Contains(level, "较高"):
+		return true, enum.AlarmEmotionAnxiety
+	case strings.Contains(level, "未发现") || strings.Contains(level, "低") || level == "":
+		return false, enum.AlarmEmotionNormal
+	default:
+		return false, enum.UnknownEmotion
+	}
 }
 
 func rptUsage(msg *schema.Message) *core.LLMUsage {

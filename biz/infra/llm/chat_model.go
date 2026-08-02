@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	ProviderCoze = "coze"
+	ProviderCoze     = "coze"
+	ProviderDeepSeek = "deepseek"
 )
 
 func init() {
 	app.ChatRegister(ProviderCoze, NewChatModel)
+	app.ChatRegister(ProviderDeepSeek, NewChatModel)
 }
 
 // ChatModel 对话大模型
@@ -38,31 +40,21 @@ func newCli(ctx context.Context, provider, url, sk, model, botId, uid string) (_
 	switch provider {
 	case impl.Coze:
 		return impl.NewCozeModel(ctx, url, sk, uid, botId)
+	case impl.DeepSeek:
+		return impl.NewDeepSeekModel(ctx, url, sk, model)
 	default:
 		return nil, errorx.New(errno.UnImplementErr)
 	}
 }
 
 func (m *ChatModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (_ *schema.Message, err error) {
-	in = reverse(in) // 翻转历史记录
 	return m.cli.Generate(ctx, in, opts...)
 }
 
 func (m *ChatModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (_ *schema.StreamReader[*schema.Message], err error) {
-	in = reverse(in) // 翻转历史记录
 	return m.cli.Stream(ctx, in, opts...)
 }
 
 func (m *ChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	return m, nil
-}
-
-func reverse(in []*schema.Message) (msgs []*schema.Message) {
-	for i := len(in) - 1; i >= 0; i-- {
-		if in[i].Content != "" {
-			in[i].Name = ""
-			msgs = append(msgs, in[i])
-		}
-	}
-	return
 }

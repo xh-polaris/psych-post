@@ -9,12 +9,16 @@ const (
 	CreateTime     = "create_time"
 	UpdateTime     = "update_time"
 	DeleteTime     = "delete_time"
+	EndTime        = "end_time"
+	StartTime      = "start_time"
 	Code           = "code"
 	CodeType       = "code_type"
 	Role           = "role"
 	Phone          = "phone"
 	Name           = "name"
 	UnitID         = "unit_id"
+	MessageCount   = "message_count"
+	CharacterID    = "character_id"
 )
 
 // json字段枚举
@@ -122,4 +126,9 @@ const (
 	SuggestStart = "<suggest>"
 	SuggestEnd   = "</suggest>"
 	CodeBound    = "```"
+)
+
+// 报表生成相关常量
+const (
+	RetryTimes = 2
 )

@@ -3,11 +3,13 @@ package application
 import (
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
+	"github.com/xh-polaris/psych-post/biz/domain/prompt"
 	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	"github.com/xh-polaris/psych-post/biz/infra/cache"
 	"github.com/xh-polaris/psych-post/biz/infra/cache/redis"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/conversation"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/message"
+	promptmapper "github.com/xh-polaris/psych-post/biz/infra/mapper/prompt"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/report"
 	"github.com/xh-polaris/psych-post/pkg/mq"
 )
@@ -30,6 +32,7 @@ func InitAppDependency() {
 	his.New(deps.Cache, deps.MessageMapper, deps.ConversationMapper)
 	wordcld.NewWordCloudExtractor(deps.ReportMapper)
 	deps.HisMgr = his.Mgr
+	prompt.New(deps.Cache, promptmapper.NewPromptMongoMapper(conf.GetConfig()))
 	deps.ConnManager = mq.NewConnManager(conf.GetConfig().RabbitMQ.Url)
 }
 
