@@ -92,8 +92,19 @@ func (m *PromptManager) GetTemplates(ctx context.Context, stage string, unitID *
 	return content, nil
 }
 
+func (m *PromptManager) FlushCache(ctx context.Context) {
+	_ = m.cache.Del(ctx, keySkills).Err()
+	_ = m.cache.Del(ctx, keyTplDialog).Err()
+	_ = m.cache.Del(ctx, keyTplPost).Err()
+	_ = m.cache.Del(ctx, "prompt:report:__default__").Err()
+}
+
 func (m *PromptManager) GetReports(ctx context.Context, unitID *bson.ObjectID) (string, error) {
-	key := fmt.Sprintf("prompt:report:%s", unitID.Hex())
+	uid := "__default__"
+	if unitID != nil {
+		uid = unitID.Hex()
+	}
+	key := fmt.Sprintf("prompt:report:%s", uid)
 	if raw, err := m.cache.Get(ctx, key).Result(); err == nil && raw != "" {
 		return raw, nil
 	}

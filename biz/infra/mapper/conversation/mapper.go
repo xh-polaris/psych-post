@@ -13,11 +13,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+var _ IMongoMapper = (*mongoMapper)(nil)
+
 const (
 	collectionName = "conversation"
 )
-
-var _ IMongoMapper = (*mongoMapper)(nil)
 
 type IMongoMapper interface {
 	mapper.IMongoMapper[Conversation]

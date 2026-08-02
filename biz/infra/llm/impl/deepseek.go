@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -84,6 +85,9 @@ func (d *DeepSeekModel) Generate(ctx context.Context, in []*schema.Message, opts
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("deepseek API error %d: %s", resp.StatusCode, string(respBytes))
 	}
 	var chatResp deepseekChatResp
 	if err = sonic.Unmarshal(respBytes, &chatResp); err != nil {
