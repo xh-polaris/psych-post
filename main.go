@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/json"
 	logx "github.com/xh-polaris/gopkg/util/log"
 	"github.com/xh-polaris/psych-post/biz/application"
+	"github.com/xh-polaris/psych-post/biz/application/internalapi"
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/report"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/config"
@@ -36,7 +37,7 @@ func Init() {
 func main() {
 	// 启动后处理程序
 	Init()
-	
+
 	// 启动http server，用于health check
 	go startHealthServer()
 	time.Sleep(100 * time.Millisecond)
@@ -64,9 +65,20 @@ func osSignalHandler(ctx context.Context) {
 func startHealthServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthz)
+	listenOn := "0.0.0.0:8080"
+	internalToken := ""
+	if cfg := conf.GetConfig(); cfg != nil {
+		if cfg.ListenOn != "" {
+			listenOn = cfg.ListenOn
+		}
+		if cfg.InternalAPI != nil {
+			internalToken = cfg.InternalAPI.Token
+		}
+	}
+	mux.Handle("/internal/v1/reports/generate", internalapi.NewReportHandler(internalToken, report.GenerateOpenAPIReport))
 
-	hlog.Info("Health check server starting on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	hlog.Infof("Health check server starting on %s", listenOn)
+	if err := http.ListenAndServe(listenOn, mux); err != nil {
 		hlog.Errorf("Health check server failed: %v", err)
 	}
 }

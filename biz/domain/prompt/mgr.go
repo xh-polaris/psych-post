@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	keySkills    = "prompt:skills"
-	keyTplDialog = "prompt:template:dialog"
-	keyTplPost   = "prompt:template:post"
-	ttl          = time.Hour
+	keySkills        = "prompt:skills"
+	keyTplDialog     = "prompt:template:dialog"
+	keyTplPost       = "prompt:template:post"
+	keyOpenAPIReport = "prompt:report:openapi"
+	ttl              = time.Hour
 )
 
 var Mgr *PromptManager
@@ -97,6 +98,7 @@ func (m *PromptManager) FlushCache(ctx context.Context) {
 	_ = m.cache.Del(ctx, keyTplDialog).Err()
 	_ = m.cache.Del(ctx, keyTplPost).Err()
 	_ = m.cache.Del(ctx, "prompt:report:__default__").Err()
+	_ = m.cache.Del(ctx, keyOpenAPIReport).Err()
 }
 
 func (m *PromptManager) GetReports(ctx context.Context, unitID *bson.ObjectID) (string, error) {
@@ -123,6 +125,24 @@ func (m *PromptManager) GetReports(ctx context.Context, unitID *bson.ObjectID) (
 	content := strings.Join(sb, "\n")
 	_ = m.cache.Set(ctx, key, content, ttl).Err()
 	return content, nil
+}
+
+// GetOpenAPIReport 优先读取开放接口专用报告模板；未配置时回退默认报告模板。
+func (m *PromptManager) GetOpenAPIReport(ctx context.Context) (string, error) {
+	if raw, err := m.cache.Get(ctx, keyOpenAPIReport).Result(); err == nil && raw != "" {
+		return raw, nil
+	}
+	items, err := m.mapper.FindActiveByStageType(ctx, enum.PromptStagePost, enum.PromptTypeReport, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range items {
+		if item.Name == "openapi_report" && strings.TrimSpace(item.Content) != "" {
+			_ = m.cache.Set(ctx, keyOpenAPIReport, item.Content, ttl).Err()
+			return item.Content, nil
+		}
+	}
+	return m.GetReports(ctx, nil)
 }
 
 func stageInt(s string) int {
