@@ -49,6 +49,7 @@ func NewReportHandler(token string, generate GenerateReport) http.Handler {
 		result, err := generate(r.Context(), req)
 		if err != nil {
 			status, code := reportError(err)
+			logs.CtxErrorf(r.Context(), "[internal report] request_id=%s status=%s err=%v", req.RequestID, code, err)
 			logs.CtxInfof(r.Context(), "[internal report] request_id=%s status=%s duration_ms=%d", req.RequestID, code, time.Since(startedAt).Milliseconds())
 			writeError(w, status, code)
 			return
