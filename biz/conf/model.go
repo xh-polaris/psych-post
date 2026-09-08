@@ -7,4 +7,5 @@ type ModelConfig struct {
 type ChatConfig struct {
 	URL       string
 	AccessKey string
+	Model     string `json:",optional"`
 }

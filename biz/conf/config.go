@@ -28,6 +28,12 @@ type (
 		DB       int `json:"DB,omitempty,default=0"`
 	}
 
+	InternalAPI struct {
+		Token                  string
+		ReportDefaultMaxTokens int
+		ReportMaxTokens        int
+	}
+
 	Config struct {
 		service.ServiceConf
 		ListenOn    string
@@ -37,6 +43,7 @@ type (
 		RabbitMQ    *RabbitMQ
 		Mongo       *MongoDB
 		ModelConfig *ModelConfig
+		InternalAPI *InternalAPI
 		Consumers   int
 	}
 )

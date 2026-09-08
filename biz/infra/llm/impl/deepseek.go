@@ -21,9 +21,10 @@ const (
 )
 
 type deepseekChatReq struct {
-	Model    string             `json:"model"`
-	Messages []*deepseekMessage `json:"messages"`
-	Stream   bool               `json:"stream"`
+	Model     string             `json:"model"`
+	Messages  []*deepseekMessage `json:"messages"`
+	Stream    bool               `json:"stream"`
+	MaxTokens int                `json:"max_tokens,omitempty"`
 }
 
 type deepseekMessage struct {
@@ -62,11 +63,7 @@ func NewDeepSeekModel(ctx context.Context, url, apiKey, modelName string) (_ mod
 
 func (d *DeepSeekModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	msgs := e2ds(in)
-	body := &deepseekChatReq{
-		Model:    d.model,
-		Messages: msgs,
-		Stream:   false,
-	}
+	body := buildChatReq(d.model, msgs, false, opts)
 	reqBytes, err := sonic.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -100,6 +97,9 @@ func (d *DeepSeekModel) Generate(ctx context.Context, in []*schema.Message, opts
 		}
 	}
 	if chatResp.Usage != nil {
+		if msg.ResponseMeta == nil {
+			msg.ResponseMeta = &schema.ResponseMeta{}
+		}
 		msg.ResponseMeta.Usage = &schema.TokenUsage{
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,
@@ -111,11 +111,7 @@ func (d *DeepSeekModel) Generate(ctx context.Context, in []*schema.Message, opts
 
 func (d *DeepSeekModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	msgs := e2ds(in)
-	body := &deepseekChatReq{
-		Model:    d.model,
-		Messages: msgs,
-		Stream:   true,
-	}
+	body := buildChatReq(d.model, msgs, true, opts)
 	reqBytes, err := sonic.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -134,6 +130,15 @@ func (d *DeepSeekModel) Stream(ctx context.Context, in []*schema.Message, opts .
 	sr, sw := schema.Pipe[*schema.Message](5)
 	go d.processStream(ctx, resp.Body, sw)
 	return sr, nil
+}
+
+func buildChatReq(modelName string, messages []*deepseekMessage, stream bool, opts []model.Option) *deepseekChatReq {
+	body := &deepseekChatReq{Model: modelName, Messages: messages, Stream: stream}
+	common := model.GetCommonOptions(&model.Options{}, opts...)
+	if common.MaxTokens != nil && *common.MaxTokens > 0 {
+		body.MaxTokens = *common.MaxTokens
+	}
+	return body
 }
 
 func (d *DeepSeekModel) processStream(ctx context.Context, body io.ReadCloser, sw *schema.StreamWriter[*schema.Message]) {
