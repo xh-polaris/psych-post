@@ -146,6 +146,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		Round:          rounds,
 		Start:          time.Unix(notify.Start, 0),
 		End:            time.Unix(notify.End, 0),
+		CreateTime:     time.Now(),
 		Config:         nil,
 		Info:           notify.Info,
 		Keywords:       kwMap,
