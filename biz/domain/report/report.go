@@ -48,6 +48,29 @@ type ConsumeManager struct {
 	wg           *sync.WaitGroup
 }
 
+type reportInputMessage struct {
+	Role    string
+	Content string
+}
+
+// buildReportInputPrompt 统一管理端与开放接口传入模型的报告上下文格式
+func buildReportInputPrompt(studentName, grade, class, gender string, messages []reportInputMessage) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("学生基本信息:\n学生姓名:%s\n班级:%s年级%s班\n性别:%s\n", studentName, grade, class, gender))
+	sb.WriteString("对话内容：\n")
+	for _, msg := range messages {
+		if msg.Content == "" {
+			continue
+		}
+		sb.WriteString("<")
+		sb.WriteString(msg.Role)
+		sb.WriteString("> ")
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func New(consumer int, cfgMapper config.IMongoMapper, usrMapper user.IMongoMapper, convMapper conversation.IMongoMapper) *ConsumeManager {
 	cm := &ConsumeManager{ConnMgr: mq.NewConnManager(conf.GetConfig().RabbitMQ.Url), ConsumersCount: consumer, wg: &sync.WaitGroup{}, ConfigMapper: cfgMapper, UserMapper: usrMapper, ConvMapper: convMapper}
 	return cm
@@ -273,7 +296,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 
 func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) ([]*schema.Message, int, error) {
 	var count int
-	var sb strings.Builder
 
 	// 填充学生信息
 	usr, err := cm.UserMapper.FindOneById(ctx, userIdObj)
@@ -282,21 +304,15 @@ func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.Object
 		return nil, 0, err
 	}
 
-	infoStr := fmt.Sprintf("学生基本信息:\n学生姓名:%s\n班级:%d年级%d班\n性别:%s\n", usr.Name, usr.Grade, usr.Class, enum.GenderI2S[usr.Gender])
-	sb.WriteString(infoStr)
-	sb.WriteString("对话内容：\n")
+	promptMessages := make([]reportInputMessage, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Content != "" { // 消息有效
 			count++
-			sb.WriteString("<")
-			sb.WriteString(enum.MsgRoleItoA[m.Role])
-			sb.WriteString(">")
-			sb.WriteString(" ")
-			sb.WriteString(m.Content)
-			sb.WriteString("\n")
+			promptMessages = append(promptMessages, reportInputMessage{Role: enum.MsgRoleItoA[m.Role], Content: m.Content})
 		}
 	}
-	return []*schema.Message{schema.UserMessage(sb.String())}, count, nil
+	content := buildReportInputPrompt(usr.Name, fmt.Sprintf("%d", usr.Grade), fmt.Sprintf("%d", usr.Class), enum.GenderI2S[usr.Gender], promptMessages)
+	return []*schema.Message{schema.UserMessage(content)}, count, nil
 }
 
 type promptMsg struct {
