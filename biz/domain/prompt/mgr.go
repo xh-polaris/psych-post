@@ -145,13 +145,13 @@ func (m *PromptManager) GetOpenAPIReport(ctx context.Context) (string, error) {
 	return m.GetReports(ctx, nil)
 }
 
-func stageInt(s string) int {
+func stageInt(s string) string {
 	switch s {
 	case "dialog":
 		return enum.PromptStageDialogue
 	case "post":
 		return enum.PromptStagePost
 	default:
-		return 0
+		return ""
 	}
 }

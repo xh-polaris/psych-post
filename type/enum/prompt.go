@@ -1,13 +1,13 @@
 package enum
 
 const (
-	PromptStageDialogue = 1
-	PromptStagePost     = 2
+	PromptStageDialogue = "dialogue"
+	PromptStagePost     = "post"
 )
 
 const (
-	PromptTypeTemplate   = 1
-	PromptTypePsychSkill = 2
-	PromptTypeCharacter  = 3
-	PromptTypeReport     = 4
+	PromptTypeTemplate   = "template"
+	PromptTypePsychSkill = "skill"
+	PromptTypeCharacter  = "character"
+	PromptTypeReport     = "report"
 )
