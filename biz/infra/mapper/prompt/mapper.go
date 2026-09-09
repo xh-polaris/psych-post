@@ -18,8 +18,8 @@ const (
 
 type IMongoMapper interface {
 	mapper.IMongoMapper[Prompt]
-	FindActiveByType(ctx context.Context, typ int) ([]*Prompt, error)
-	FindActiveByStageType(ctx context.Context, stage, typ int, unitID *bson.ObjectID) ([]*Prompt, error)
+	FindActiveByType(ctx context.Context, typ string) ([]*Prompt, error)
+	FindActiveByStageType(ctx context.Context, stage, typ string, unitID *bson.ObjectID) ([]*Prompt, error)
 	FindActiveSkillsByNames(ctx context.Context, names []string) ([]*Prompt, error)
 }
 
@@ -38,12 +38,12 @@ func NewPromptMongoMapper(cfg *conf.Config) IMongoMapper {
 	}
 }
 
-func (m *mongoMapper) FindActiveByType(ctx context.Context, typ int) ([]*Prompt, error) {
+func (m *mongoMapper) FindActiveByType(ctx context.Context, typ string) ([]*Prompt, error) {
 	filter := bson.M{cst.Status: 1, "type": typ}
 	return mapper.NewMongoMapper[Prompt](m.conn).FindAllByFields(ctx, filter)
 }
 
-func (m *mongoMapper) FindActiveByStageType(ctx context.Context, stage, typ int, unitID *bson.ObjectID) ([]*Prompt, error) {
+func (m *mongoMapper) FindActiveByStageType(ctx context.Context, stage, typ string, unitID *bson.ObjectID) ([]*Prompt, error) {
 	filter := bson.M{
 		cst.Status: 1,
 		"stage":    stage,
