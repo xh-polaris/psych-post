@@ -204,7 +204,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	var reportUsage *core.LLMUsage
 	var raw string
 	for attempt := 0; attempt < cst.RetryTimes; attempt++ {
-		resp, genErr := cli.Generate(ctx, prompt)
+		resp, genErr := cli.Generate(ctx, prompt, impl.WithJSONOutput())
 		if genErr != nil {
 			logs.Errorf("[mq consumer] generate err: %s", genErr)
 			err = genErr

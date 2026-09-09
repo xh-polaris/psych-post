@@ -21,10 +21,26 @@ const (
 )
 
 type deepseekChatReq struct {
-	Model     string             `json:"model"`
-	Messages  []*deepseekMessage `json:"messages"`
-	Stream    bool               `json:"stream"`
-	MaxTokens int                `json:"max_tokens,omitempty"`
+	Model          string                  `json:"model"`
+	Messages       []*deepseekMessage      `json:"messages"`
+	Stream         bool                    `json:"stream"`
+	MaxTokens      int                     `json:"max_tokens,omitempty"`
+	ResponseFormat *deepseekResponseFormat `json:"response_format,omitempty"`
+}
+
+type deepseekResponseFormat struct {
+	Type string `json:"type"`
+}
+
+type deepseekOptions struct {
+	JSONOutput bool
+}
+
+// WithJSONOutput 要求 DeepSeek 返回 JSON 对象，仅适用于同步生成
+func WithJSONOutput() model.Option {
+	return model.WrapImplSpecificOptFn(func(o *deepseekOptions) {
+		o.JSONOutput = true
+	})
 }
 
 type deepseekMessage struct {
@@ -137,6 +153,9 @@ func buildChatReq(modelName string, messages []*deepseekMessage, stream bool, op
 	common := model.GetCommonOptions(&model.Options{}, opts...)
 	if common.MaxTokens != nil && *common.MaxTokens > 0 {
 		body.MaxTokens = *common.MaxTokens
+	}
+	if !stream && model.GetImplSpecificOptions(&deepseekOptions{}, opts...).JSONOutput {
+		body.ResponseFormat = &deepseekResponseFormat{Type: "json_object"}
 	}
 	return body
 }
