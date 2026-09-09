@@ -231,18 +231,18 @@ func buildOpenAPIReportSystemPrompt(ctx context.Context, profile OpenAPIReportSu
 
 func buildOpenAPIReportUserPrompt(profile OpenAPIReportSubjectProfile, messages []OpenAPIReportMessage) string {
 	data := openAPIReportTemplateData(profile, messages)
-	var b strings.Builder
-	b.WriteString("受访者基本信息：\n")
-	b.WriteString(fmt.Sprintf("称呼:%s\n年级:%s\n班级:%s\n性别:%s\n", data.StudentName, data.Grade, data.Class, data.Gender))
-	b.WriteString("对话内容：\n")
+	promptMessages := make([]reportInputMessage, 0, len(data.Messages))
 	for _, msg := range data.Messages {
-		b.WriteString("<")
-		b.WriteString(msg.Role)
-		b.WriteString("> ")
-		b.WriteString(msg.Content)
-		b.WriteString("\n")
+		promptMessages = append(promptMessages, reportInputMessage{Role: msg.Role, Content: msg.Content})
 	}
-	return b.String()
+	gender := "未知"
+	switch data.Gender {
+	case "male":
+		gender = "男"
+	case "female":
+		gender = "女"
+	}
+	return buildReportInputPrompt(data.StudentName, data.Grade, data.Class, gender, promptMessages)
 }
 
 type openAPIReportTemplateMessage struct {
