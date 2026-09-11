@@ -135,13 +135,12 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		return false, nil
 	}
 
-	// 获取当天该用户所有消息并按时间正序
-	msgs, err := his.Mgr.GetUserDailyMessages(ctx, userId, notify.Date)
+	// 只读取本报告段内、当前 conversation 的新增消息（[Start, End] 区间，按老师隔离）
+	msgs, err := his.Mgr.GetConversationMessages(ctx, oids[2], time.Unix(notify.Start, 0), time.Unix(notify.End, 0))
 	if err != nil {
-		logs.Errorf("[mq consumer] retrieve daily messages err: %s", err)
+		logs.Errorf("[mq consumer] retrieve report segment messages err: %s", err)
 		return
 	}
-	reverse(msgs)
 
 	// 统计对话轮数
 	rounds := 0
@@ -461,10 +460,4 @@ func rptUsage(msg *schema.Message) *core.LLMUsage {
 		}
 	}
 	return nil
-}
-
-func reverse(msgs []*message.Message) {
-	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
-		msgs[i], msgs[j] = msgs[j], msgs[i]
-	}
 }

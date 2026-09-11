@@ -82,6 +82,12 @@ func (h *HistoryManager) GetUserDailyMessages(ctx context.Context, userId, date 
 	return msgs, nil
 }
 
+// GetConversationMessages 按 conversationId + 时间区间取本段报告的消息。
+// 报告只针对当前会话、本次连接 [Start, End] 区间的新增消息，天然按老师隔离、不跨段重复。
+func (h *HistoryManager) GetConversationMessages(ctx context.Context, conversationID bson.ObjectID, start, end time.Time) ([]*message.Message, error) {
+	return h.mapper.FindByConversationAndTimeRange(ctx, conversationID, start, end)
+}
+
 func (h *HistoryManager) RetrieveMessage(ctx context.Context, convId string, size int) ([]*message.Message, error) {
 	oid, err := bson.ObjectIDFromHex(convId)
 	if err != nil {

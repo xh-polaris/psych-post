@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/cst"
@@ -24,6 +25,7 @@ const (
 type IMongoMapper interface {
 	RetrieveMessage(ctx context.Context, conversation string, size int) ([]*Message, error)
 	FindByConversationIds(ctx context.Context, convIds []bson.ObjectID, opts options.Lister[options.FindOptions]) ([]*Message, error)
+	FindByConversationAndTimeRange(ctx context.Context, convID bson.ObjectID, start, end time.Time) ([]*Message, error)
 	Insert(ctx context.Context, msg *Message) error
 }
 
@@ -64,6 +66,22 @@ func (m *mongoMapper) FindByConversationIds(ctx context.Context, convIds []bson.
 		cst.Status:         bson.M{cst.NE: cst.DeletedStatus},
 	}, opts); err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		logs.Errorf("[message mapper] find by conversation ids err:%s", errorx.ErrorWithoutStack(err))
+		return nil, err
+	}
+	return msgs, nil
+}
+
+// FindByConversationAndTimeRange 按 conversationId + 时间区间取消息，用于报告段生成。
+// 左开右闭 (start, end]，按 create_time 正序返回。
+func (m *mongoMapper) FindByConversationAndTimeRange(ctx context.Context, convID bson.ObjectID, start, end time.Time) ([]*Message, error) {
+	var msgs []*Message
+	filter := bson.M{
+		cst.ConversationID: convID,
+		cst.Status:         bson.M{cst.NE: cst.DeletedStatus},
+		cst.CreateTime:     bson.M{cst.GT: start, cst.LTE: end},
+	}
+	if err := m.conn.Find(ctx, &msgs, filter, options.Find().SetSort(bson.M{cst.CreateTime: 1})); err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		logs.Errorf("[message mapper] find by conversation and time range err:%s", errorx.ErrorWithoutStack(err))
 		return nil, err
 	}
 	return msgs, nil
