@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,11 +12,9 @@ import (
 )
 
 const (
-	keySkills        = "prompt:skills"
-	keyTplDialog     = "prompt:template:dialog"
-	keyTplPost       = "prompt:template:post"
-	keyOpenAPIReport = "prompt:report:openapi"
-	ttl              = time.Hour
+	keySkills    = "prompt:skills"
+	keyTplPrefix = "prompt:template:"
+	ttl          = time.Hour
 )
 
 var Mgr *PromptManager
@@ -74,13 +71,12 @@ func pickMap(raw map[string]string, names []string) map[string]string {
 }
 
 func (m *PromptManager) GetTemplates(ctx context.Context, stage string, unitID *bson.ObjectID) (string, error) {
-	key := fmt.Sprintf("prompt:template:%s", stage)
+	key := keyTplPrefix + stage
 	if raw, err := m.cache.Get(ctx, key).Result(); err == nil && raw != "" {
 		return raw, nil
 	}
 
-	ty := enum.PromptTypeTemplate
-	all, err := m.mapper.FindActiveByStageType(ctx, stageInt(stage), ty, unitID)
+	all, err := m.mapper.FindActiveByStageType(ctx, stageInt(stage), enum.PromptTypeTemplate, unitID)
 	if err != nil {
 		return "", err
 	}
@@ -95,52 +91,43 @@ func (m *PromptManager) GetTemplates(ctx context.Context, stage string, unitID *
 
 func (m *PromptManager) FlushCache(ctx context.Context) {
 	_ = m.cache.Del(ctx, keySkills).Err()
-	_ = m.cache.Del(ctx, keyTplDialog).Err()
-	_ = m.cache.Del(ctx, keyTplPost).Err()
-	_ = m.cache.Del(ctx, "prompt:report:__default__").Err()
-	_ = m.cache.Del(ctx, keyOpenAPIReport).Err()
+	_ = m.cache.Del(ctx, keyTplPrefix+"dialog").Err()
+	_ = m.cache.Del(ctx, keyTplPrefix+"post").Err()
+	_ = m.cache.Del(ctx, keyTplPrefix+"report").Err()
+	_ = m.cache.Del(ctx, keyTplPrefix+"openapi_report").Err()
 }
 
+// GetReports 获取报告系统提示词, 与 core-api GetTemplate("report") 共用缓存 key prompt:template:report
 func (m *PromptManager) GetReports(ctx context.Context, unitID *bson.ObjectID) (string, error) {
-	uid := "__default__"
-	if unitID != nil {
-		uid = unitID.Hex()
-	}
-	key := fmt.Sprintf("prompt:report:%s", uid)
+	key := keyTplPrefix + "report"
 	if raw, err := m.cache.Get(ctx, key).Result(); err == nil && raw != "" {
 		return raw, nil
 	}
 
-	all, err := m.mapper.FindActiveByStageType(ctx, enum.PromptStagePost, enum.PromptTypeReport, unitID)
+	p, err := m.mapper.FindActiveByNameType(ctx, enum.PromptTypeReport, enum.PromptTypeReport, unitID)
 	if err != nil {
 		return "", err
 	}
-	if len(all) == 0 {
+	if p == nil || strings.TrimSpace(p.Content) == "" {
 		return "", nil
 	}
-	sb := make([]string, len(all))
-	for i, p := range all {
-		sb[i] = p.Content
-	}
-	content := strings.Join(sb, "\n")
-	_ = m.cache.Set(ctx, key, content, ttl).Err()
-	return content, nil
+	_ = m.cache.Set(ctx, key, p.Content, ttl).Err()
+	return p.Content, nil
 }
 
 // GetOpenAPIReport 优先读取开放接口专用报告模板；未配置时回退默认报告模板。
 func (m *PromptManager) GetOpenAPIReport(ctx context.Context) (string, error) {
-	if raw, err := m.cache.Get(ctx, keyOpenAPIReport).Result(); err == nil && raw != "" {
+	key := keyTplPrefix + "openapi_report"
+	if raw, err := m.cache.Get(ctx, key).Result(); err == nil && raw != "" {
 		return raw, nil
 	}
-	items, err := m.mapper.FindActiveByStageType(ctx, enum.PromptStagePost, enum.PromptTypeReport, nil)
+	p, err := m.mapper.FindActiveByNameType(ctx, "openapi_report", enum.PromptTypeReport, nil)
 	if err != nil {
 		return "", err
 	}
-	for _, item := range items {
-		if item.Name == "openapi_report" && strings.TrimSpace(item.Content) != "" {
-			_ = m.cache.Set(ctx, keyOpenAPIReport, item.Content, ttl).Err()
-			return item.Content, nil
-		}
+	if p != nil && strings.TrimSpace(p.Content) != "" {
+		_ = m.cache.Set(ctx, key, p.Content, ttl).Err()
+		return p.Content, nil
 	}
 	return m.GetReports(ctx, nil)
 }
