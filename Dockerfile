@@ -2,24 +2,21 @@ FROM golang:1.25-alpine AS builder
 
 LABEL stage=gobuilder
 
-ENV CGO_ENABLED 1
+ENV CGO_ENABLED 0
 ENV GOPROXY https://goproxy.cn,direct
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
-RUN apk update --no-cache && apk add --no-cache tzdata gcc musl-dev g++ make cmake
+RUN apk update --no-cache && apk add --no-cache tzdata
 
 WORKDIR /build
 ADD go.mod .
 ADD go.sum .
 RUN go mod download
-RUN mkdir -p /build/dict
-RUN cp -r /go/pkg/mod/github.com/yanyiwu/gojieba@v1.4.7/deps/cppjieba/dict/* /build/dict/ || true
 
 COPY .. .
 RUN sh ./build.sh
 
 FROM alpine
-RUN apk add --no-cache libstdc++
 
 COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/Asia/Shanghai
 
@@ -27,8 +24,5 @@ ENV TZ Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /build/output /app
-COPY --from=builder /build/dict /app/dict
-
-ENV JIEBA_DICT_PATH=/app/dict
 
 CMD ["sh", "./bootstrap.sh"]

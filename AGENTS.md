@@ -3,7 +3,7 @@
 ## Build & Run
 - Build: `bash build.sh` (produces `output/bin/psych.post` and `output/bootstrap.sh`)
 - Config: set `CONFIG_PATH` env or defaults to `etc/config.yaml`; test config at `etc/[test]config.yaml`; local overrides at `etc/[local]config.txt`
-- Docker build includes gojieba dict files (copied from the module cache); `JIEBA_DICT_PATH` defaults to `/app/dict`
+- Docker build: CGO_ENABLED=0 static build (no compiler toolchain needed)
 - Stopwords path: `STOPWORDS_PATH` env or defaults to `etc/stopwords_full.txt`
 - No Makefile, no lint/typecheck commands defined in the repo
 
@@ -31,7 +31,6 @@ psych-core-api (WebSocket chat)  →  RabbitMQ exchange: psych_his_test  →  qu
 - `biz/domain/report/report.go` — core report generation pipeline (message → config lookup → LLM call → MongoDB write). Single file.
 - `biz/domain/prompt/mgr.go` — prompt template manager (singleton `prompt.Mgr`); fetches Go-template prompts from MongoDB `prompt` collection with Redis cache. Mirrors psych-core-api's prompt domain.
 - `biz/domain/his/` — daily message history with Redis cache (6h TTL, per-user per-day); global singleton `his.Mgr`
-- `biz/domain/wordcld/` — Chinese word cloud via gojieba (requires dict files); global singleton `wordcld.Extractor`
 - `biz/infra/mapper/` — MongoDB data access (generic `IMongoMapper[T]` using go-zero `monc`). Includes `prompt` mapper for the `prompt` collection.
 - `biz/application/base.go` — manual DI wiring (wire is a dep but not codegen'd)
 - `pkg/app/` — chat app abstraction with provider registry pattern (`init()` registers factories)
@@ -43,7 +42,7 @@ The full flow in `report.DoConsume`:
 1. Parse `PostNotify` from AMQP delivery
 2. Extract userId/unitId/session from message; convert hex strings to ObjectIDs
 3. Fetch daily messages from Redis cache (fallback: MongoDB conversations→messages)
-4. Count conversation rounds, generate word cloud keywords
+4. Count conversation rounds
 5. Insert initial Report with status `Processing`
 6. Fetch unit config from MongoDB (contains LLM provider + appId)
 7. Build Coze ChatApp via provider factory
@@ -72,7 +71,6 @@ The full flow in `report.DoConsume`:
 ## Dependencies
 - Redis (message cache), MongoDB (persistence, shared with psych-core-api), RabbitMQ (message bus), Coze API (LLM)
 - OpenTelemetry with B3 propagation + Jaeger exporter
-- gojieba needs CGO and dict files at runtime; Dockerfile copies dict from module cache at build time
 
 ## CI/CD
 - GitHub Actions: `.github/workflows/upgrade.yml`
