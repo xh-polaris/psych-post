@@ -126,7 +126,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	userId, _ := notify.Info[cst.JsonUserID].(string)
 	unitId, _ := notify.Info[cst.JsonUnitID].(string)
 	session := notify.Session
-	logs.Info("[mq consumer] consume notify received for: {unitId: %s, userId: %s, session: %s}", unitId, userId, session)
+	logs.Infof("[mq consumer] consume notify received for: {unitId: %s, userId: %s, session: %s}", unitId, userId, session)
 
 	// 先做无需模型的部分：MetaInfo、获取历史消息、生成关键词词云并写入初始报表（报表状态为Processing）
 	oids, err := util.ObjectIDsFromHex(unitId, userId, session)
@@ -238,7 +238,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 	if result == nil {
 		logs.Errorf("[mq consumer] unmarshal failed after retry")
-		logs.Info("[mq consumer] raw llm output: %s", raw)
+		logs.Infof("[mq consumer] raw llm output: %s", raw)
 		return
 	}
 
@@ -250,9 +250,12 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		"simple_report": result.SimpleReport,
 		"need_alarm":    result.NeedAlarm,
 		"report_usage":  reportUsage,
-		"asr_usage":     notify.Usage.ASRUsage,
-		"tts_usage":     notify.Usage.TTSUsage,
 		"status":        enum.ReportStatusSuccess,
+	}
+	// Usage 可能为 nil，判空后写入用量字段
+	if notify.Usage != nil {
+		update["asr_usage"] = notify.Usage.ASRUsage
+		update["tts_usage"] = notify.Usage.TTSUsage
 	}
 	if err = re.Mapper.UpdateFields(ctx, rptID, update); err != nil {
 		logs.Error("[mq consumer] update report err:", err)
