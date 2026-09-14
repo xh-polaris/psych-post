@@ -126,6 +126,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	userId, _ := notify.Info[cst.JsonUserID].(string)
 	unitId, _ := notify.Info[cst.JsonUnitID].(string)
 	session := notify.Session
+	logs.Info("[mq consumer] consume notify received for: {unitId: %s, userId: %s, session: %s}", unitId, userId, session)
 
 	// 先做无需模型的部分：MetaInfo、获取历史消息、生成关键词词云并写入初始报表（报表状态为Processing）
 	oids, err := util.ObjectIDsFromHex(unitId, userId, session)
@@ -179,6 +180,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		logs.Error("[mq consumer] insert initial report err:", err)
 		return
 	}
+	logs.Info("[mq consumer] report for conversation{id=%s} generating...", session)
 
 	// 构建 ChatSetting：provider 固定为 deepseek，凭证从 YAML 读
 	dsCfg, ok := conf.GetConfig().ModelConfig.Chat[impl.DeepSeek]
@@ -200,18 +202,18 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 构造报表生成提示词
-	prompt, msgCount, err := cm.buildPrompt(ctx, userOID, msgs)
+	prmpt, msgCount, err := cm.buildPrompt(ctx, userOID, msgs)
 	if err != nil {
-		logs.Errorf("[mq consumer] build prompt err: %s", err)
+		logs.Errorf("[mq consumer] build prmpt err: %s", err)
 		return
 	}
 	_ = msgCount
 
-	// 尝试从 prompt 管理器获取 report/post 阶段的模板作为 system prompt
+	// 尝试从 prmpt 管理器获取 report/post 阶段的模板作为 system prmpt
 	if sysPrompt, err := cm.buildSystemPrompt(ctx, userOID, msgs); err == nil && sysPrompt != nil {
-		prompt = append([]*schema.Message{sysPrompt}, prompt...)
+		prmpt = append([]*schema.Message{sysPrompt}, prmpt...)
 	} else if err != nil {
-		logs.Errorf("[mq consumer] build system prompt err: %s", err)
+		logs.Errorf("[mq consumer] build system prmpt err: %s", err)
 	}
 
 	// 调用模型生成报表，解析失败则重试1次
@@ -219,7 +221,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	var reportUsage *core.LLMUsage
 	var raw string
 	for attempt := 0; attempt < cst.RetryTimes; attempt++ {
-		resp, genErr := cli.Generate(ctx, prompt, impl.WithJSONOutput())
+		resp, genErr := cli.Generate(ctx, prmpt, impl.WithJSONOutput())
 		if genErr != nil {
 			logs.Errorf("[mq consumer] generate err: %s", genErr)
 			err = genErr
@@ -387,38 +389,19 @@ func cleanJSONString(input string) string {
 	return input
 }
 
+// extraReport 直接将模型输出绑定到 report mapper 的 Report 模型，
+// json tag 与提示词 v2 输出约定对齐（title/analysis/simple_report）
 func extraReport(s string) (*re.Report, error) {
 	if s == "" {
 		return &re.Report{}, errorx.New(errno.InvalidModelOutPut)
 	}
 
-	type extra struct {
-		Title        string           `json:"title"`
-		Digest       string           `json:"digest,omitempty"`
-		Analysis     *re.Analysis     `json:"analysis,omitempty"`
-		SimpleReport *re.SimpleReport `json:"simple_report,omitempty"`
-		ReportAlt    *re.SimpleReport `json:"report,omitempty"`
-	}
-
-	var e extra
-	if err := sonic.Unmarshal([]byte(s), &e); err != nil {
+	rpt := new(re.Report)
+	if err := sonic.Unmarshal([]byte(s), rpt); err != nil {
 		return nil, err
 	}
-
-	simpleReport := e.SimpleReport
-	if simpleReport == nil {
-		simpleReport = e.ReportAlt
-	}
-
-	needAlarm := deriveAlarm(simpleReport)
-
-	return &re.Report{
-		Title:        e.Title,
-		Digest:       e.Digest,
-		Analysis:     e.Analysis,
-		SimpleReport: simpleReport,
-		NeedAlarm:    needAlarm,
-	}, nil
+	rpt.NeedAlarm = deriveAlarm(rpt.SimpleReport)
+	return rpt, nil
 }
 
 // deriveAlarm 新报表 riskLevel 为数值：0未明确 | 1高风险 | 2中高风险 | 3中低风险 | 4低风险
