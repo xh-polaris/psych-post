@@ -16,14 +16,21 @@ import (
 	impl "github.com/xh-polaris/psych-post/biz/infra/llm/impl"
 	re "github.com/xh-polaris/psych-post/biz/infra/mapper/report"
 	"github.com/xh-polaris/psych-post/pkg/app"
+	"github.com/xh-polaris/psych-post/pkg/logs"
 )
 
 const (
 	defaultOpenAPIReportMaxTokens = 4096
 	maxOpenAPIReportMaxTokens     = 4096
+	maxOpenAPIReportAttempts      = 2
 )
 
-var ErrInvalidOpenAPIReportRequest = errors.New("invalid openapi report request")
+var (
+	ErrInvalidOpenAPIReportRequest  = errors.New("invalid openapi report request")
+	errOpenAPIReportMalformedOutput = errors.New("openapi report model output is malformed")
+)
+
+const openAPIReportRepairInstruction = "\n\n上一次输出未能解析为完整报告。请只输出完整、合法的 JSON，不要使用 Markdown 代码块；必须包含 analysis 和 simple_report。"
 
 // OpenAPIReportMessage 是第三方报告接口传入的一条完整对话消息。
 type OpenAPIReportMessage struct {
@@ -86,19 +93,9 @@ func GenerateOpenAPIReport(ctx context.Context, req OpenAPIReportRequest) (*Open
 	if err != nil {
 		return nil, fmt.Errorf("create report model: %w", err)
 	}
-	resp, err := cli.Generate(ctx, msgs, model.WithMaxTokens(maxTokens))
+	parsed, usage, err := generateOpenAPIReportWithRetry(ctx, req.RequestID, cli, msgs, maxTokens)
 	if err != nil {
-		return nil, fmt.Errorf("generate report: %w", err)
-	}
-	if resp == nil || strings.TrimSpace(resp.Content) == "" {
-		return nil, fmt.Errorf("generate report: empty model output")
-	}
-	parsed, err := extraReport(cleanJSONString(resp.Content))
-	if err != nil {
-		return nil, fmt.Errorf("parse report: %w", err)
-	}
-	if parsed.Analysis == nil || parsed.SimpleReport == nil {
-		return nil, fmt.Errorf("parse report: incomplete report structure")
+		return nil, err
 	}
 	return &OpenAPIReportResult{
 		Title:        parsed.Title,
@@ -106,8 +103,77 @@ func GenerateOpenAPIReport(ctx context.Context, req OpenAPIReportRequest) (*Open
 		NeedAlarm:    parsed.NeedAlarm,
 		Analysis:     parsed.Analysis,
 		SimpleReport: parsed.SimpleReport,
-		Usage:        openAPIUsage(resp),
+		Usage:        usage,
 	}, nil
+}
+
+type openAPIReportModel interface {
+	Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error)
+}
+
+func generateOpenAPIReportWithRetry(ctx context.Context, requestID string, cli openAPIReportModel, msgs []*schema.Message, maxTokens int) (*re.Report, *OpenAPIUsage, error) {
+	var totalUsage *OpenAPIUsage
+	for attempt := 1; attempt <= maxOpenAPIReportAttempts; attempt++ {
+		parsed, usage, err := generateOpenAPIReportAttempt(ctx, cli, msgs, maxTokens)
+		totalUsage = addOpenAPIUsage(totalUsage, usage)
+		if err == nil {
+			return parsed, totalUsage, nil
+		}
+		if !errors.Is(err, errOpenAPIReportMalformedOutput) || attempt == maxOpenAPIReportAttempts || ctx.Err() != nil {
+			return nil, nil, err
+		}
+		logs.CtxInfof(ctx, "[openapi report] request_id=%s status=retrying_malformed_output attempt=%d", requestID, attempt+1)
+		msgs = openAPIReportRepairMessages(msgs)
+	}
+	return nil, nil, errOpenAPIReportMalformedOutput
+}
+
+func generateOpenAPIReportAttempt(ctx context.Context, cli openAPIReportModel, msgs []*schema.Message, maxTokens int) (*re.Report, *OpenAPIUsage, error) {
+	resp, err := cli.Generate(ctx, msgs, model.WithMaxTokens(maxTokens))
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate report: %w", err)
+	}
+	usage := openAPIUsage(resp)
+	if resp == nil || strings.TrimSpace(resp.Content) == "" {
+		return nil, usage, fmt.Errorf("%w: empty model output", errOpenAPIReportMalformedOutput)
+	}
+	parsed, err := extraReport(cleanJSONString(resp.Content))
+	if err != nil {
+		return nil, usage, fmt.Errorf("%w: parse report: %v", errOpenAPIReportMalformedOutput, err)
+	}
+	if parsed.Analysis == nil || parsed.SimpleReport == nil {
+		return nil, usage, fmt.Errorf("%w: incomplete report structure", errOpenAPIReportMalformedOutput)
+	}
+	return parsed, usage, nil
+}
+
+func openAPIReportRepairMessages(msgs []*schema.Message) []*schema.Message {
+	repaired := make([]*schema.Message, len(msgs))
+	for i, msg := range msgs {
+		if msg == nil {
+			continue
+		}
+		copy := *msg
+		if i == 0 && copy.Role == schema.System {
+			copy.Content += openAPIReportRepairInstruction
+		}
+		repaired[i] = &copy
+	}
+	return repaired
+}
+
+func addOpenAPIUsage(total, current *OpenAPIUsage) *OpenAPIUsage {
+	if current == nil {
+		return total
+	}
+	if total == nil {
+		copy := *current
+		return &copy
+	}
+	total.PromptTokens += current.PromptTokens
+	total.CompletionTokens += current.CompletionTokens
+	total.TotalTokens += current.TotalTokens
+	return total
 }
 
 func openAPIUsage(msg *schema.Message) *OpenAPIUsage {
