@@ -20,6 +20,7 @@ type IMongoMapper interface {
 	mapper.IMongoMapper[Prompt]
 	FindActiveByType(ctx context.Context, typ string) ([]*Prompt, error)
 	FindActiveByStageType(ctx context.Context, stage, typ string, unitID *bson.ObjectID) ([]*Prompt, error)
+	FindActiveByNameType(ctx context.Context, name, typ string, unitID *bson.ObjectID) (*Prompt, error)
 	FindActiveSkillsByNames(ctx context.Context, names []string) ([]*Prompt, error)
 }
 
@@ -55,6 +56,21 @@ func (m *mongoMapper) FindActiveByStageType(ctx context.Context, stage, typ stri
 		filter["unit_id"] = bson.M{"$exists": false}
 	}
 	return mapper.NewMongoMapper[Prompt](m.conn).FindAllByFields(ctx, filter)
+}
+
+// FindActiveByNameType 按 name+type 查找启用的提示词, unitID 为空时匹配全局模板
+func (m *mongoMapper) FindActiveByNameType(ctx context.Context, name, typ string, unitID *bson.ObjectID) (*Prompt, error) {
+	filter := bson.M{
+		cst.Status: 1,
+		cst.Name:   name,
+		"type":     typ,
+	}
+	if unitID != nil {
+		filter["unit_id"] = *unitID
+	} else {
+		filter["unit_id"] = bson.M{"$exists": false}
+	}
+	return mapper.NewMongoMapper[Prompt](m.conn).FindOneByFields(ctx, filter)
 }
 
 func (m *mongoMapper) FindActiveSkillsByNames(ctx context.Context, names []string) ([]*Prompt, error) {

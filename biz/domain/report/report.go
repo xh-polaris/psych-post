@@ -16,7 +16,6 @@ import (
 	"github.com/xh-polaris/psych-post/biz/cst"
 	"github.com/xh-polaris/psych-post/biz/domain/his"
 	"github.com/xh-polaris/psych-post/biz/domain/prompt"
-	"github.com/xh-polaris/psych-post/biz/domain/wordcld"
 	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
 	impl "github.com/xh-polaris/psych-post/biz/infra/llm/impl"
 	"github.com/xh-polaris/psych-post/biz/infra/mapper/alarm"
@@ -150,12 +149,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		}
 	}
 
-	// 生成关键词词云（来自 domain/wordcld）
-	kwMap, err := wordcld.Extractor.FromHisMsgPercent(msgs)
-	if err != nil {
-		logs.Errorf("[mq consumer] wordcloud extract err: %s", err)
-	}
-
 	unitOID, userOID, convOID := oids[0], oids[1], oids[2]
 
 	// 插入初始报表（Processing），调用模型生成后以 UpdateFields 补全
@@ -171,7 +164,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		CreateTime:     time.Now(),
 		Config:         nil,
 		Info:           notify.Info,
-		Keywords:       kwMap,
 		Status:         enum.ReportStatusProcessing,
 	}
 	if notify.Character != nil {
@@ -255,7 +247,6 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		"analysis":      result.Analysis,
 		"simple_report": result.SimpleReport,
 		"need_alarm":    result.NeedAlarm,
-		"emotion":       result.Emotion,
 		"report_usage":  reportUsage,
 		"asr_usage":     notify.Usage.ASRUsage,
 		"tts_usage":     notify.Usage.TTSUsage,
@@ -273,14 +264,14 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 
 	// 可能需要创建预警
-	if result.NeedAlarm {
+	if result.NeedAlarm && result.SimpleReport != nil {
 		al := alarm.Alarm{
 			ID:             bson.NewObjectID(),
 			UnitID:         unitOID,
 			UserID:         userOID,
 			ConversationID: convOID,
-			Emotion:        result.Emotion,
-			Keywords:       util.KeywordsMap2Slice(initial.Keywords),
+			Emotion:        result.SimpleReport.Emotion,
+			Keywords:       result.SimpleReport.Keywords,
 			Status:         enum.AlarmStatusPending,
 			CreateTime:     time.Now(),
 		}
@@ -419,7 +410,7 @@ func extraReport(s string) (*re.Report, error) {
 		simpleReport = e.ReportAlt
 	}
 
-	needAlarm, emotion := deriveAlarm(simpleReport)
+	needAlarm := deriveAlarm(simpleReport)
 
 	return &re.Report{
 		Title:        e.Title,
@@ -427,24 +418,19 @@ func extraReport(s string) (*re.Report, error) {
 		Analysis:     e.Analysis,
 		SimpleReport: simpleReport,
 		NeedAlarm:    needAlarm,
-		Emotion:      emotion,
 	}, nil
 }
 
-func deriveAlarm(rpt *re.SimpleReport) (needAlarm bool, emotion int) {
+// deriveAlarm 新报表 riskLevel 为数值：0未明确 | 1高风险 | 2中高风险 | 3中低风险 | 4低风险
+func deriveAlarm(rpt *re.SimpleReport) (needAlarm bool) {
 	if rpt == nil {
-		return false, enum.UnknownEmotion
+		return false
 	}
-	level := strings.TrimSpace(rpt.RiskObservation.Level)
-	switch {
-	case strings.Contains(level, "高危") || strings.Contains(level, "严重") || strings.Contains(level, "紧急"):
-		return true, enum.AlarmEmotionDanger
-	case strings.Contains(level, "中") || strings.Contains(level, "较高"):
-		return true, enum.AlarmEmotionAnxiety
-	case strings.Contains(level, "未发现") || strings.Contains(level, "低") || level == "":
-		return false, enum.AlarmEmotionNormal
+	switch rpt.RiskLevel {
+	case 1, 2:
+		return true
 	default:
-		return false, enum.UnknownEmotion
+		return false
 	}
 }
 
