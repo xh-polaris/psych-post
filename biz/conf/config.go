@@ -34,6 +34,16 @@ type (
 		ReportMaxTokens        int
 	}
 
+	OpenAPIUpstream struct {
+		URL       string
+		Model     string
+		AccessKey string
+	}
+
+	OpenAPI struct {
+		Upstreams map[string]*OpenAPIUpstream `json:",optional"`
+	}
+
 	Config struct {
 		service.ServiceConf
 		ListenOn    string
@@ -44,6 +54,7 @@ type (
 		Mongo       *MongoDB
 		ModelConfig *ModelConfig
 		InternalAPI *InternalAPI
+		OpenAPI     *OpenAPI `json:",optional"`
 		Consumers   int
 	}
 )

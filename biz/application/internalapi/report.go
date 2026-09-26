@@ -16,7 +16,9 @@ import (
 
 const maxReportRequestBytes = 2 << 20
 
-type GenerateReport func(context.Context, report.OpenAPIReportRequest) (*report.OpenAPIReportResult, error)
+const upstreamHeader = "X-Psych-Upstream"
+
+type GenerateReport func(context.Context, report.OpenAPIReportRequest, string) (*report.OpenAPIReportResult, error)
 
 // NewReportHandler 创建仅供 core-api 调用的同步报告生成入口
 func NewReportHandler(token string, generate GenerateReport) http.Handler {
@@ -33,6 +35,11 @@ func NewReportHandler(token string, generate GenerateReport) http.Handler {
 			writeError(w, http.StatusServiceUnavailable, "report_generator_unavailable")
 			return
 		}
+		upstream := strings.TrimSpace(r.Header.Get(upstreamHeader))
+		if upstream == "" {
+			writeError(w, http.StatusBadRequest, "missing_upstream")
+			return
+		}
 
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxReportRequestBytes))
 		if err != nil {
@@ -46,15 +53,15 @@ func NewReportHandler(token string, generate GenerateReport) http.Handler {
 		}
 
 		startedAt := time.Now()
-		result, err := generate(r.Context(), req)
+		result, err := generate(r.Context(), req, upstream)
 		if err != nil {
 			status, code := reportError(err)
-			logs.CtxErrorf(r.Context(), "[internal report] request_id=%s status=%s err=%v", req.RequestID, code, err)
-			logs.CtxInfof(r.Context(), "[internal report] request_id=%s status=%s duration_ms=%d", req.RequestID, code, time.Since(startedAt).Milliseconds())
+			logs.CtxErrorf(r.Context(), "[internal report] request_id=%s upstream=%s status=%s err=%v", req.RequestID, upstream, code, err)
+			logs.CtxInfof(r.Context(), "[internal report] request_id=%s upstream=%s status=%s duration_ms=%d", req.RequestID, upstream, code, time.Since(startedAt).Milliseconds())
 			writeError(w, status, code)
 			return
 		}
-		logs.CtxInfof(r.Context(), "[internal report] request_id=%s status=completed duration_ms=%d", req.RequestID, time.Since(startedAt).Milliseconds())
+		logs.CtxInfof(r.Context(), "[internal report] request_id=%s upstream=%s status=completed duration_ms=%d", req.RequestID, upstream, time.Since(startedAt).Milliseconds())
 		writeJSON(w, http.StatusOK, result)
 	})
 }
