@@ -72,7 +72,8 @@ type OpenAPIUsage struct {
 }
 
 // GenerateOpenAPIReport 生成第三方报告，不读取或写入学生、会话、报告及告警数据。
-func GenerateOpenAPIReport(ctx context.Context, req OpenAPIReportRequest) (*OpenAPIReportResult, error) {
+// upstream 来自已经通过内部 Token 验证的 core-api；它只标识凭据，不携带明文密钥。
+func GenerateOpenAPIReport(ctx context.Context, req OpenAPIReportRequest, upstream string) (*OpenAPIReportResult, error) {
 	if err := ValidateOpenAPIReportRequest(req); err != nil {
 		return nil, err
 	}
@@ -80,7 +81,7 @@ func GenerateOpenAPIReport(ctx context.Context, req OpenAPIReportRequest) (*Open
 	if err != nil {
 		return nil, err
 	}
-	setting, err := openAPIReportSetting()
+	setting, err := openAPIReportSetting(upstream)
 	if err != nil {
 		return nil, err
 	}
@@ -239,20 +240,12 @@ func openAPIReportMaxTokens(value int) (int, error) {
 	return value, nil
 }
 
-func openAPIReportSetting() (*app.ChatSetting, error) {
-	cfg := conf.GetConfig()
-	if cfg == nil || cfg.ModelConfig == nil {
-		return nil, fmt.Errorf("report model configuration is unavailable")
+func openAPIReportSetting(upstreamName string) (*app.ChatSetting, error) {
+	upstream, err := conf.GetConfig().OpenAPIUpstreamByName(upstreamName)
+	if err != nil {
+		return nil, err
 	}
-	dsCfg, ok := cfg.ModelConfig.Chat[impl.DeepSeek]
-	if !ok || dsCfg == nil || dsCfg.URL == "" || dsCfg.AccessKey == "" {
-		return nil, fmt.Errorf("deepseek report configuration is unavailable")
-	}
-	modelName := dsCfg.Model
-	if modelName == "" {
-		modelName = impl.DefaultDeepSeekModel
-	}
-	return &app.ChatSetting{Provider: impl.DeepSeek, Url: dsCfg.URL, Model: modelName, AccessKey: dsCfg.AccessKey}, nil
+	return &app.ChatSetting{Provider: impl.DeepSeek, Url: upstream.URL, Model: upstream.Model, AccessKey: upstream.AccessKey}, nil
 }
 
 func buildOpenAPIReportMessages(ctx context.Context, profile OpenAPIReportSubjectProfile, messages []OpenAPIReportMessage) ([]*schema.Message, error) {
