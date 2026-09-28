@@ -274,6 +274,7 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 			ID:             bson.NewObjectID(),
 			UnitID:         unitOID,
 			UserID:         userOID,
+			ReportID:       rptID,
 			ConversationID: convOID,
 			Emotion:        result.SimpleReport.Emotion,
 			Keywords:       result.SimpleReport.Keywords,
