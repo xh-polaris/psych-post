@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	"github.com/xh-polaris/psych-post/type/enum"
 	"github.com/xh-polaris/psych-post/type/errno"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // ConsumeManager 管理报表生成任务的消息消费
@@ -152,7 +154,8 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 
 	unitOID, userOID, convOID := oids[0], oids[1], oids[2]
 
-	// 插入初始报表（Processing），调用模型生成后以 UpdateFields 补全
+	// 查询或插入初始报表（Processing）。消息在失败后会被 MQ 重新投递，
+	// 必须复用同一会话、同一时间段的记录，避免每次重试都产生一条孤立的 Processing 报表。
 	rptID := bson.NewObjectID()
 	initial := &re.Report{
 		ID:             rptID,
@@ -176,7 +179,22 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 			Image: notify.Character.Image,
 		}
 	}
-	if err = re.Mapper.InsertOne(ctx, initial); err != nil {
+	existing, findErr := re.Mapper.FindOneBySegment(ctx, convOID, initial.Start, initial.End)
+	if findErr == nil {
+		if existing.Status == enum.ReportStatusSuccess {
+			if err = cm.ensureAlarm(ctx, existing); err != nil {
+				logs.Error("[mq consumer] ensure alarm for completed report err:", err)
+				return
+			}
+			return true, nil
+		}
+		initial = existing
+		rptID = existing.ID
+		logs.Infof("[mq consumer] reuse report{id=%s} for redelivered notification", rptID.Hex())
+	} else if !errors.Is(findErr, mongo.ErrNoDocuments) {
+		logs.Error("[mq consumer] find report by segment err:", findErr)
+		return
+	} else if err = re.Mapper.InsertOne(ctx, initial); err != nil {
 		logs.Error("[mq consumer] insert initial report err:", err)
 		return
 	}
@@ -268,26 +286,42 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 		// 标题更新失败不影响整体报表生成，继续执行
 	}
 
-	// 可能需要创建预警
-	if result.NeedAlarm && result.SimpleReport != nil {
-		al := alarm.Alarm{
-			ID:             bson.NewObjectID(),
-			UnitID:         unitOID,
-			UserID:         userOID,
-			ReportID:       rptID,
-			ConversationID: convOID,
-			Emotion:        result.SimpleReport.Emotion,
-			Keywords:       result.SimpleReport.Keywords,
-			Status:         enum.AlarmStatusPending,
-			CreateTime:     time.Now(),
-		}
-		if err = alarm.Mapper.Insert(ctx, &al); err != nil {
-			logs.Error("[mq consumer] insert alarm err:", err)
-			return
-		}
+	initial.NeedAlarm = result.NeedAlarm
+	initial.SimpleReport = result.SimpleReport
+	if err = cm.ensureAlarm(ctx, initial); err != nil {
+		logs.Error("[mq consumer] ensure alarm err:", err)
+		return
 	}
 
 	return true, nil
+}
+
+// ensureAlarm 为已成功生成的报表补齐预警，并保证 MQ 重投不重复创建预警。
+func (cm *ConsumeManager) ensureAlarm(ctx context.Context, rpt *re.Report) error {
+	if !rpt.NeedAlarm || rpt.SimpleReport == nil {
+		return nil
+	}
+
+	exists, err := alarm.Mapper.ExistsByReportID(ctx, rpt.ID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	al := alarm.Alarm{
+		ID:             bson.NewObjectID(),
+		UnitID:         rpt.UnitID,
+		UserID:         rpt.UserID,
+		ReportID:       rpt.ID,
+		ConversationID: rpt.ConversationID,
+		Emotion:        rpt.SimpleReport.Emotion,
+		Keywords:       rpt.SimpleReport.Keywords,
+		Status:         enum.AlarmStatusPending,
+		CreateTime:     time.Now(),
+	}
+	return alarm.Mapper.Insert(ctx, &al)
 }
 
 func (cm *ConsumeManager) buildPrompt(ctx context.Context, userIdObj bson.ObjectID, msgs []*message.Message) ([]*schema.Message, int, error) {
