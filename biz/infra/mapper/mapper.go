@@ -8,6 +8,7 @@ import (
 
 	"github.com/xh-polaris/psych-post/biz/cst"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/zeromicro/go-zero/core/stores/monc"
 )
@@ -70,8 +71,14 @@ func (m *mongoMapper[T]) Insert(ctx context.Context, data *T) error {
 
 // UpdateFields 更新字段
 func (m *mongoMapper[T]) UpdateFields(ctx context.Context, id bson.ObjectID, update bson.M) error {
-	_, err := m.conn.UpdateOneNoCache(ctx, bson.M{cst.ID: id}, bson.M{"$set": update})
-	return err
+	result, err := m.conn.UpdateOneNoCache(ctx, bson.M{cst.ID: id}, bson.M{"$set": update})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return mongo.ErrNoDocuments
+	}
+	return nil
 }
 
 // ExistsByFields 根据字段查询是否存在实体
