@@ -285,7 +285,7 @@ func buildOpenAPIReportSystemPrompt(ctx context.Context, profile OpenAPIReportSu
 	if result == "" {
 		return nil, fmt.Errorf("render report prompt: empty content")
 	}
-	return schema.SystemMessage(result), nil
+	return schema.SystemMessage(result + "\n\n" + riskLevelOutputInstruction), nil
 }
 
 func buildOpenAPIReportUserPrompt(profile OpenAPIReportSubjectProfile, messages []OpenAPIReportMessage) string {

@@ -200,11 +200,15 @@ func (m *mongoMapper) CountByClasses(ctx context.Context, unitId bson.ObjectID, 
 			"$group": bson.M{
 				cst.ID:    bson.M{cst.Grade: "$" + cst.Grade, cst.Class: "$" + cst.Class},
 				"userNum": bson.M{"$sum": 1}, // 总人数
-				"alarmNum": bson.M{ // 风险人数
+				"alarmNum": bson.M{ // 中低风险及以上人数
 					"$sum": bson.M{
 						"$cond": bson.M{
-							"if":   bson.M{cst.NE: []interface{}{"$riskLevel", enum.UserRiskLevelNormal}},
-							"then": 1, // RiskLevel ≠ "normal"则认为是风险用户 计数+1
+							"if": bson.M{"$in": []interface{}{"$risk_level", bson.A{
+								enum.UserRiskLevelMediumLow,
+								enum.UserRiskLevelMediumHigh,
+								enum.UserRiskLevelHigh,
+							}}},
+							"then": 1,
 							"else": 0,
 						},
 					},

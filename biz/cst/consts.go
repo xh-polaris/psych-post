@@ -19,6 +19,7 @@ const (
 	UnitID         = "unit_id"
 	MessageCount   = "message_count"
 	CharacterID    = "character_id"
+	ReportID       = "report_id"
 )
 
 // json字段枚举
