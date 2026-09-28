@@ -54,6 +54,8 @@ type reportInputMessage struct {
 	Content string
 }
 
+const riskLevelOutputInstruction = `输出 simple_report.riskLevel 时必须严格使用以下整数：-1=未明确、0=低风险、1=中低风险、2=中高风险、3=高风险。数值越大风险越高；不得输出其他值。`
+
 // buildReportInputPrompt 统一管理端与开放接口传入模型的报告上下文格式
 func buildReportInputPrompt(studentName, grade, class, gender string, messages []reportInputMessage) string {
 	var sb strings.Builder
@@ -363,7 +365,7 @@ func (cm *ConsumeManager) buildSystemPrompt(ctx context.Context, userIdObj bson.
 		}
 	}
 	if p == "" {
-		return nil, nil
+		return schema.SystemMessage(riskLevelOutputInstruction), nil
 	}
 
 	usr, err := cm.UserMapper.FindOneById(ctx, userIdObj)
@@ -406,7 +408,7 @@ func (cm *ConsumeManager) buildSystemPrompt(ctx context.Context, userIdObj bson.
 	if content == "" {
 		return nil, nil
 	}
-	return schema.SystemMessage(content), nil
+	return schema.SystemMessage(content + "\n\n" + riskLevelOutputInstruction), nil
 }
 
 func cleanJSONString(input string) string {
@@ -438,17 +440,20 @@ func extraReport(s string) (*re.Report, error) {
 	if err := sonic.Unmarshal([]byte(s), rpt); err != nil {
 		return nil, err
 	}
+	if rpt.SimpleReport != nil && (rpt.SimpleReport.RiskLevel < enum.UserRiskLevelUnknown || rpt.SimpleReport.RiskLevel > enum.UserRiskLevelHigh) {
+		return nil, errorx.New(errno.InvalidModelOutPut)
+	}
 	rpt.NeedAlarm = deriveAlarm(rpt.SimpleReport)
 	return rpt, nil
 }
 
-// deriveAlarm 新报表 riskLevel 为数值：0未明确 | 1高风险 | 2中高风险 | 3中低风险 | 4低风险
+// deriveAlarm 新报表 riskLevel 为数值：-1未明确 | 0低风险 | 1中低风险 | 2中高风险 | 3高风险。
 func deriveAlarm(rpt *re.SimpleReport) (needAlarm bool) {
 	if rpt == nil {
 		return false
 	}
 	switch rpt.RiskLevel {
-	case 1, 2:
+	case 2, 3:
 		return true
 	default:
 		return false

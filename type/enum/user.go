@@ -22,12 +22,13 @@ const (
 	UserRoleSuperAdmin   = 5
 )
 
-// UserRiskLevel
+// UserRiskLevel 与报告 simple_report.riskLevel 对齐，数值越大风险越高。
 const (
-	UserRiskLevelHigh   = 1
-	UserRiskLevelMedium = 2
-	UserRiskLevelLow    = 3
-	UserRiskLevelNormal = 4
+	UserRiskLevelUnknown    = -1
+	UserRiskLevelLow        = 0
+	UserRiskLevelMediumLow  = 1
+	UserRiskLevelMediumHigh = 2
+	UserRiskLevelHigh       = 3
 )
 
 // UserStatus
