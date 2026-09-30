@@ -130,7 +130,7 @@ func generateOpenAPIReportWithRetry(ctx context.Context, requestID string, cli o
 }
 
 func generateOpenAPIReportAttempt(ctx context.Context, cli openAPIReportModel, msgs []*schema.Message, maxTokens int) (*re.Report, *OpenAPIUsage, error) {
-	resp, err := cli.Generate(ctx, msgs, model.WithMaxTokens(maxTokens))
+	resp, err := cli.Generate(ctx, msgs, model.WithMaxTokens(maxTokens), impl.WithJSONOutput())
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate report: %w", err)
 	}

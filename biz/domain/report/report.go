@@ -435,6 +435,7 @@ func extraReport(s string) (*re.Report, error) {
 	if s == "" {
 		return &re.Report{}, errorx.New(errno.InvalidModelOutPut)
 	}
+	s = normalizeSimpleReportEmotion(s)
 
 	rpt := new(re.Report)
 	if err := sonic.Unmarshal([]byte(s), rpt); err != nil {
@@ -445,6 +446,37 @@ func extraReport(s string) (*re.Report, error) {
 	}
 	rpt.NeedAlarm = deriveAlarm(rpt.SimpleReport)
 	return rpt, nil
+}
+
+// normalizeSimpleReportEmotion is a compatibility guard for occasional model
+// output that follows the older object-shaped emotion schema. The persisted
+// schema requires simple_report.emotion to be a string array; analysis.emotion
+// deliberately remains an object array.
+func normalizeSimpleReportEmotion(input string) string {
+	var payload map[string]any
+	if err := sonic.Unmarshal([]byte(input), &payload); err != nil {
+		return input
+	}
+
+	simpleReport, ok := payload["simple_report"].(map[string]any)
+	if !ok {
+		return input
+	}
+	emotion, ok := simpleReport["emotion"].(map[string]any)
+	if !ok {
+		return input
+	}
+	emotionType, ok := emotion["type"].(string)
+	if !ok || strings.TrimSpace(emotionType) == "" {
+		return input
+	}
+
+	simpleReport["emotion"] = []string{emotionType}
+	normalized, err := sonic.Marshal(payload)
+	if err != nil {
+		return input
+	}
+	return string(normalized)
 }
 
 // deriveAlarm 新报表 riskLevel 为数值：-1未明确 | 0低风险 | 1中低风险 | 2中高风险 | 3高风险。
