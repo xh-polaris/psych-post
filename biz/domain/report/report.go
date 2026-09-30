@@ -435,7 +435,7 @@ func extraReport(s string) (*re.Report, error) {
 	if s == "" {
 		return &re.Report{}, errorx.New(errno.InvalidModelOutPut)
 	}
-	s = normalizeSimpleReportEmotion(s)
+	s = normalizeReportEmotions(s)
 
 	rpt := new(re.Report)
 	if err := sonic.Unmarshal([]byte(s), rpt); err != nil {
@@ -448,35 +448,102 @@ func extraReport(s string) (*re.Report, error) {
 	return rpt, nil
 }
 
-// normalizeSimpleReportEmotion is a compatibility guard for occasional model
-// output that follows the older object-shaped emotion schema. The persisted
-// schema requires simple_report.emotion to be a string array; analysis.emotion
-// deliberately remains an object array.
-func normalizeSimpleReportEmotion(input string) string {
+// normalizeReportEmotions is a compatibility guard for occasional model
+// output that follows older object-shaped emotion schemas. The persisted
+// schema requires simple_report.emotion to be a string array and
+// analysis.emotion to be an object array.
+func normalizeReportEmotions(input string) string {
 	var payload map[string]any
 	if err := sonic.Unmarshal([]byte(input), &payload); err != nil {
 		return input
 	}
 
-	simpleReport, ok := payload["simple_report"].(map[string]any)
-	if !ok {
-		return input
-	}
-	emotion, ok := simpleReport["emotion"].(map[string]any)
-	if !ok {
-		return input
-	}
-	emotionType, ok := emotion["type"].(string)
-	if !ok || strings.TrimSpace(emotionType) == "" {
+	changed := normalizeSimpleReportEmotion(payload)
+	changed = normalizeAnalysisEmotion(payload) || changed
+	if !changed {
 		return input
 	}
 
-	simpleReport["emotion"] = []string{emotionType}
 	normalized, err := sonic.Marshal(payload)
 	if err != nil {
 		return input
 	}
 	return string(normalized)
+}
+
+func normalizeSimpleReportEmotion(payload map[string]any) bool {
+	simpleReport, ok := payload["simple_report"].(map[string]any)
+	if !ok {
+		return false
+	}
+	emotion, ok := simpleReport["emotion"].(map[string]any)
+	if !ok {
+		return false
+	}
+	emotionType, ok := emotion["type"].(string)
+	if !ok || strings.TrimSpace(emotionType) == "" {
+		return false
+	}
+	simpleReport["emotion"] = []string{emotionType}
+	return true
+}
+
+func normalizeAnalysisEmotion(payload map[string]any) bool {
+	analysis, ok := payload["analysis"].(map[string]any)
+	if !ok {
+		return false
+	}
+	emotion, ok := analysis["emotion"].(map[string]any)
+	if !ok {
+		return false
+	}
+	types := emotionTypes(emotion["type"])
+	if len(types) == 0 {
+		return false
+	}
+	intensity := emotion["intensity"]
+	normalized := make([]map[string]any, 0, len(types))
+	for index, emotionType := range types {
+		normalized = append(normalized, map[string]any{
+			"type":      emotionType,
+			"intensity": analysisEmotionIntensity(intensity, index),
+		})
+	}
+	analysis["emotion"] = normalized
+	return true
+}
+
+func emotionTypes(value any) []string {
+	switch types := value.(type) {
+	case string:
+		if strings.TrimSpace(types) == "" {
+			return nil
+		}
+		return []string{types}
+	case []any:
+		result := make([]string, 0, len(types))
+		for _, item := range types {
+			emotionType, ok := item.(string)
+			if ok && strings.TrimSpace(emotionType) != "" {
+				result = append(result, emotionType)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func analysisEmotionIntensity(value any, index int) float64 {
+	if intensity, ok := value.(float64); ok {
+		return intensity
+	}
+	if intensities, ok := value.([]any); ok && index < len(intensities) {
+		if intensity, ok := intensities[index].(float64); ok {
+			return intensity
+		}
+	}
+	return 1.0
 }
 
 // deriveAlarm 新报表 riskLevel 为数值：-1未明确 | 0低风险 | 1中低风险 | 2中高风险 | 3高风险。
