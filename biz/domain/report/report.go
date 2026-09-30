@@ -460,6 +460,7 @@ func normalizeReportEmotions(input string) string {
 
 	changed := normalizeSimpleReportEmotion(payload)
 	changed = normalizeAnalysisEmotion(payload) || changed
+	changed = normalizeReportLevels(payload) || changed
 	if !changed {
 		return input
 	}
@@ -544,6 +545,69 @@ func analysisEmotionIntensity(value any, index int) float64 {
 		}
 	}
 	return 1.0
+}
+
+func normalizeReportLevels(payload map[string]any) bool {
+	changed := false
+	if analysis, ok := payload["analysis"].(map[string]any); ok {
+		if distress, ok := analysis["distress"].(map[string]any); ok {
+			if level, ok := distress["level"].(string); ok {
+				if normalized, ok := normalizedDistressLevel(level); ok {
+					distress["level"] = normalized
+					changed = true
+				}
+			}
+		}
+	}
+	if simpleReport, ok := payload["simple_report"].(map[string]any); ok {
+		if level, ok := simpleReport["riskLevel"].(string); ok {
+			if normalized, ok := normalizedRiskLevel(level); ok {
+				simpleReport["riskLevel"] = normalized
+				changed = true
+			}
+		}
+		if level, ok := simpleReport["distressLevel"].(string); ok {
+			if normalized, ok := normalizedDistressLevel(level); ok {
+				simpleReport["distressLevel"] = normalized
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func normalizedDistressLevel(value string) (int, bool) {
+	switch strings.TrimSpace(value) {
+	case "0", "正常", "正常波动", "无", "无明显困扰":
+		return 0, true
+	case "1", "低", "轻", "轻度", "低度":
+		return 1, true
+	case "2", "中", "中度":
+		return 2, true
+	case "3", "重", "重度":
+		return 3, true
+	case "4", "高危", "高危风险":
+		return 4, true
+	default:
+		return 0, false
+	}
+}
+
+func normalizedRiskLevel(value string) (int, bool) {
+	switch strings.TrimSpace(value) {
+	case "-1", "未明确", "未知":
+		return -1, true
+	case "0", "低", "低风险":
+		return 0, true
+	case "1", "中低", "中低风险":
+		return 1, true
+	case "2", "中高", "中高风险":
+		return 2, true
+	case "3", "高", "高风险", "高危", "高危风险":
+		return 3, true
+	default:
+		return 0, false
+	}
 }
 
 // deriveAlarm 新报表 riskLevel 为数值：-1未明确 | 0低风险 | 1中低风险 | 2中高风险 | 3高风险。

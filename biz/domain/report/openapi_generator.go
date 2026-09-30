@@ -30,7 +30,7 @@ var (
 	errOpenAPIReportMalformedOutput = errors.New("openapi report model output is malformed")
 )
 
-const openAPIReportRepairInstruction = "\n\n上一次输出未能解析为完整报告。请只输出完整、合法的 JSON，不要使用 Markdown 代码块；必须包含 analysis 和 simple_report。"
+const openAPIReportRepairInstruction = "\n\n上一次输出未能解析为完整报告。请只输出完整、合法的 JSON，不要使用 Markdown 代码块；必须包含 analysis 和 simple_report。analysis.emotion 必须是 [{\"type\":\"情绪\",\"intensity\":1.0}] 形式的对象数组；simple_report.emotion 必须是 [\"情绪\"] 形式的字符串数组；analysis.distress.level、simple_report.riskLevel、simple_report.distressLevel 必须是整数，不能输出中文等级文本。"
 
 // OpenAPIReportMessage 是第三方报告接口传入的一条完整对话消息。
 type OpenAPIReportMessage struct {
