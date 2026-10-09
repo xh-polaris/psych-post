@@ -202,16 +202,21 @@ func (cm *ConsumeManager) DoConsume(ctx context.Context, d *amqp.Delivery) (ok b
 	}
 	logs.Info("[mq consumer] report for conversation{id=%s} generating...", session)
 
-	// 构建 ChatSetting：provider 固定为 deepseek，凭证从 YAML 读
-	dsCfg, ok := conf.GetConfig().ModelConfig.Chat[impl.DeepSeek]
-	if !ok {
-		logs.Errorf("[mq consumer] deepseek config not found in YAML")
+	// 构建 ChatSetting：模型与凭证均从运行时配置读取。
+	appConfig := conf.GetConfig()
+	if appConfig == nil || appConfig.ModelConfig == nil {
+		logs.Errorf("[mq consumer] deepseek model configuration is unavailable")
+		return
+	}
+	dsCfg, ok := appConfig.ModelConfig.Chat[impl.DeepSeek]
+	if !ok || dsCfg == nil || strings.TrimSpace(dsCfg.URL) == "" || strings.TrimSpace(dsCfg.Model) == "" || strings.TrimSpace(dsCfg.AccessKey) == "" {
+		logs.Errorf("[mq consumer] deepseek model configuration is incomplete")
 		return
 	}
 	reportSetting := &app.ChatSetting{
 		Provider:  impl.DeepSeek,
 		Url:       dsCfg.URL,
-		Model:     impl.DefaultDeepSeekModel,
+		Model:     dsCfg.Model,
 		AccessKey: dsCfg.AccessKey,
 		UserId:    userId,
 	}

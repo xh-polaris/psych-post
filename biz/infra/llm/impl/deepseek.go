@@ -16,8 +16,6 @@ import (
 
 const (
 	DeepSeek = "deepseek"
-
-	DefaultDeepSeekModel = "deepseek-v4-pro"
 )
 
 type deepseekChatReq struct {
