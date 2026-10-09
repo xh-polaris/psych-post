@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	defaultOpenAPIReportMaxTokens = 4096
-	maxOpenAPIReportMaxTokens     = 4096
+	defaultOpenAPIReportMaxTokens = 8192
+	maxOpenAPIReportMaxTokens     = 8192
 	maxOpenAPIReportAttempts      = 2
 )
 
