@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/xh-polaris/psych-post/biz/conf"
 	"github.com/xh-polaris/psych-post/biz/domain/prompt"
-	_ "github.com/xh-polaris/psych-post/biz/infra/llm"
+	"github.com/xh-polaris/psych-post/biz/infra/llm"
 	impl "github.com/xh-polaris/psych-post/biz/infra/llm/impl"
 	re "github.com/xh-polaris/psych-post/biz/infra/mapper/report"
 	"github.com/xh-polaris/psych-post/pkg/app"
@@ -245,7 +245,14 @@ func openAPIReportSetting(upstreamName string) (*app.ChatSetting, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &app.ChatSetting{Provider: impl.DeepSeek, Url: upstream.URL, Model: upstream.Model, AccessKey: upstream.AccessKey}, nil
+	provider := upstream.Provider
+	if provider == "" {
+		provider = llm.ProviderDeepSeek
+	}
+	return &app.ChatSetting{
+		Provider: provider, Url: upstream.URL, Model: upstream.Model, AccessKey: upstream.AccessKey,
+		ChatCompletionsPath: upstream.ChatCompletionsPath,
+	}, nil
 }
 
 func buildOpenAPIReportMessages(ctx context.Context, profile OpenAPIReportSubjectProfile, messages []OpenAPIReportMessage) ([]*schema.Message, error) {

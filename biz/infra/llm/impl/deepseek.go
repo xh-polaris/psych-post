@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	DeepSeek = "deepseek"
+	DeepSeek                    = "deepseek"
+	deepSeekChatCompletionsPath = "/v1/chat/completions"
+	openAIChatCompletionsPath   = "/chat/completions"
 )
 
 type deepseekChatReq struct {
@@ -34,7 +36,7 @@ type deepseekOptions struct {
 	JSONOutput bool
 }
 
-// WithJSONOutput 要求 DeepSeek 返回 JSON 对象，仅适用于同步生成
+// WithJSONOutput 要求兼容接口返回 JSON 对象，仅适用于同步生成。
 func WithJSONOutput() model.Option {
 	return model.WrapImplSpecificOptFn(func(o *deepseekOptions) {
 		o.JSONOutput = true
@@ -63,26 +65,59 @@ type DeepSeekModel struct {
 	model  string
 	apiKey string
 	url    string
-	cli    *http.Client
+	path   string
+	// enableJSONOutput 控制是否发送 response_format=json_object。
+	// 部分 OpenAI 兼容上游未声明该扩展字段，必须只依赖提示词约束 JSON。
+	enableJSONOutput bool
+	cli              *http.Client
 }
 
-func NewDeepSeekModel(ctx context.Context, url, apiKey, modelName string) (_ model.ToolCallingChatModel, err error) {
+// NewDeepSeekModel 保持既有 DeepSeek 调用路径，以兼容未配置 Provider 的旧上游。
+func NewDeepSeekModel(ctx context.Context, url, apiKey, modelName, chatCompletionsPath string) (_ model.ToolCallingChatModel, err error) {
+	return newChatCompletionsModel(url, apiKey, modelName, chatCompletionsPath, deepSeekChatCompletionsPath, true), nil
+}
+
+// NewOpenAICompatibleModel 用于 GLM 等采用 OpenAI Chat Completions 请求与 SSE
+// 响应格式的上游。默认路径不含 /v1，避免把 GLM 的 /api/paas/v4 误拼成 /v1。
+func NewOpenAICompatibleModel(ctx context.Context, url, apiKey, modelName, chatCompletionsPath string) (_ model.ToolCallingChatModel, err error) {
+	return newChatCompletionsModel(url, apiKey, modelName, chatCompletionsPath, openAIChatCompletionsPath, true), nil
+}
+
+// NewInnoSparkModel 使用 InnoSpark 已声明的标准请求字段，不发送未在其文档中
+// 声明的 response_format 扩展字段。
+func NewInnoSparkModel(ctx context.Context, url, apiKey, modelName, chatCompletionsPath string) (_ model.ToolCallingChatModel, err error) {
+	return newChatCompletionsModel(url, apiKey, modelName, chatCompletionsPath, deepSeekChatCompletionsPath, false), nil
+}
+
+func newChatCompletionsModel(url, apiKey, modelName, chatCompletionsPath, defaultPath string, enableJSONOutput bool) *DeepSeekModel {
+	path := strings.TrimSpace(chatCompletionsPath)
+	if path == "" {
+		path = defaultPath
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
 	return &DeepSeekModel{
-		model:  modelName,
-		apiKey: apiKey,
-		url:    strings.TrimRight(url, "/"),
-		cli:    http.DefaultClient,
-	}, nil
+		model:            modelName,
+		apiKey:           apiKey,
+		url:              strings.TrimRight(url, "/"),
+		path:             path,
+		enableJSONOutput: enableJSONOutput,
+		cli:              http.DefaultClient,
+	}
 }
 
 func (d *DeepSeekModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	msgs := e2ds(in)
 	body := buildChatReq(d.model, msgs, false, opts)
+	if !d.enableJSONOutput {
+		body.ResponseFormat = nil
+	}
 	reqBytes, err := sonic.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+"/v1/chat/completions", bytes.NewReader(reqBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+d.path, bytes.NewReader(reqBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +165,7 @@ func (d *DeepSeekModel) Stream(ctx context.Context, in []*schema.Message, opts .
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+"/v1/chat/completions", bytes.NewReader(reqBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url+d.path, bytes.NewReader(reqBytes))
 	if err != nil {
 		return nil, err
 	}
