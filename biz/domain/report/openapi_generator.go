@@ -205,10 +205,6 @@ func ValidateOpenAPIReportRequest(req OpenAPIReportRequest) error {
 			return fmt.Errorf("%w: message %d must have content", ErrInvalidOpenAPIReportRequest, i)
 		}
 	}
-	last := req.Messages[len(req.Messages)-1]
-	if last.Role != "user" {
-		return fmt.Errorf("%w: last message must be user", ErrInvalidOpenAPIReportRequest)
-	}
 	if gender := req.SubjectProfile.Gender; gender != "" && gender != "male" && gender != "female" && gender != "unknown" {
 		return fmt.Errorf("%w: unsupported gender", ErrInvalidOpenAPIReportRequest)
 	}
