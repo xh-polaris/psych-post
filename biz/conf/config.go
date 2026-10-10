@@ -35,9 +35,11 @@ type (
 	}
 
 	OpenAPIUpstream struct {
-		URL       string
-		Model     string
-		AccessKey string
+		Provider            string `json:",optional"`
+		URL                 string
+		Model               string
+		AccessKey           string
+		ChatCompletionsPath string `json:",optional"`
 	}
 
 	OpenAPI struct {
